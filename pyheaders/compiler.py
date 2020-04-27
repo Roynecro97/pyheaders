@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from functools import lru_cache
 from itertools import chain
 from typing import AnyStr, Dict, Iterable, List, Pattern, Text, Tuple, Type
+from warnings import warn
 
 
 CompileCommandsEntry = Dict[Text, Text]
@@ -25,6 +26,12 @@ class PluginError(subprocess.CalledProcessError):
 
     def __init__(self, proc: subprocess.CompletedProcess):
         super().__init__(returncode=proc.returncode, cmd=shlex.join(proc.args), output=proc.stdout, stderr=proc.stderr)
+
+
+class MissingCompileCommands(UserWarning):
+    '''
+    Warns that the provided compile commands is missing and therefore ignored.
+    '''
 
 
 @contextmanager
@@ -115,6 +122,9 @@ class CommandsParser:
                     commands = json.load(commands_fd)
 
                 self.__commands_getter = lambda filename: commands
+            else:
+                warn(f"Ignoring the provided commands_path. Reason: missing: '{commands_path}' is not a file.",
+                     category=MissingCompileCommands, stacklevel=2)
 
         if not self.__commands_getter:
             self.__commands_getter = CommandsParser.__get_compile_commands
