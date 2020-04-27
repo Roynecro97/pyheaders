@@ -8,11 +8,7 @@ import os
 
 from typing import AnyStr as _Path, IO as _IO, Iterable as _Iterable, Text as _Text
 
-from . import compiler
-from . import cpp
-from . import parser
-from . import parsers
-from . import utils
+from . import compiler, cpp, parser, parsers, utils
 
 
 def _load_file(filename: _Path, /, extra_args: _Iterable[_Text] = None, *, verbose: bool = False,
