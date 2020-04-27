@@ -1,216 +1,420 @@
-#!/usr/bin/env python
-
+'''
+Implements utils for running the compiler and parsing clang's compile_commands.json.
+'''
+import json
 import os
 import re
-import sys
-import json
+import shlex
 import subprocess
+import sys
 
-# When set to False compiler errors are silent
-VERBOSE = True
+from contextlib import contextmanager
+from functools import lru_cache
+from itertools import chain
+from typing import AnyStr, Dict, Iterable, List, Pattern, Text, Tuple, Type
 
 
-def find_git_env(start_at=None):
+CompileCommandsEntry = Dict[Text, Text]
+CompileCommands = List[CompileCommandsEntry]
+
+
+class PluginError(subprocess.CalledProcessError):
     '''
-    Finds the git environment containing the pwd.
-    Returns None if not environment is found.
-
-    TODO: improve docs
+    Raised to indicate that the plugin process failed.
     '''
-    if start_at is None:
-        start_at = os.curdir
 
-    prev_dir = None
-    curr_dir = os.path.abspath(start_at)
-    while '.git' not in os.listdir(curr_dir):
-        prev_dir = curr_dir
-        curr_dir = os.path.abspath(os.path.join(curr_dir, os.pardir))
-        if curr_dir == prev_dir:
-            break
-    else:
-        return curr_dir
+    def __init__(self, proc: subprocess.CompletedProcess):
+        super().__init__(returncode=proc.returncode, cmd=shlex.join(proc.args), output=proc.stdout, stderr=proc.stderr)
 
 
-def get_compile_commands(start_at=None):
+@contextmanager
+def directory(dirname: AnyStr):
     '''
-    TODO: docs
+    Changes the current directory to `dirname`.
+
+    @param dirname The path to change into.
+
+    Typical usage:
+
+        with directory(<dirname>):
+            <code>
+
+    Can also be used as a decorator to make a function always run in
+    a specific directory:
+
+        @directory(<dirname>)
+        def some_func(<arguments>):
+            <body>
+
+    Equivalent to this:
+
+        def some_func(<arguments>):
+            with directory(<dirname>):
+                <body>
     '''
-    env = find_git_env(start_at)
-    cmds_file = os.path.join(env or os.curdir, 'compile_commands.json')
-
-    if env and os.path.isfile(cmds_file):
-        with open(cmds_file) as cmds_fd:
-            return json.load(cmds_fd)
-    elif os.path.isfile('compile_commands.json'):
-        with open(cmds_file) as cmds_fd:
-            return json.load(cmds_fd)
-    else:
-        return {}
+    old_cwd = os.getcwd()
+    os.chdir(dirname)
+    try:
+        yield
+    finally:
+        os.chdir(old_cwd)
 
 
-def find_in_cmds(filename, cmds):
-    '''
-    find_in_cmds(filename, cmds) -> dict
-
-    Find the commands to compile `filename`.
-    `None` is returned if no such command is found.
-
-    @param filename The file to look for.
-    @param cmds     A compile_commands.json style dictionary.
-    '''
-    for cmd in cmds:
-        if cmd['file'] == filename:
-            return cmd
-
-
-# Pattern for strip_cmds()
-_PATTERNS = [
-    r'^cc\s+',
-    r'(?:^|\s+)-c(?=\s+)',
-    r'(?:^|\s+)-o\s+\.objects/.*?\.o(?=\s+)',
-    r'(?:^|\s+)-g\d?(?=\s+)',
-    r'(?:^|\s+)-O\d?(?=\s+)'
+C_CPP_SOURCE_FILES_EXTENSIONS = [
+    # C++
+    '.cpp',
+    '.cc',
+    '.cxx',
+    '.C',
+    '.CPP',
+    '.cp',
+    '.c++',
+    '.ii',  # C++ code that will not be pre-processed
+    # C
+    '.c',
+    '.i'  # C code that will not be pre-processed
+    # Pre-compiled headers
+    '.h',
+    '.hpp',
+    '.hh',
+    '.hxx',
+    '.H',
+    '.HPP',
+    '.hp',
+    '.h++',
+    '.tcc'
 ]
 
 
-def strip_cmds(cmd):
+class CommandsParser:
     '''
-    strip_cmds(cmd) -> str
-
-    Removes unwanted flags from `command` field in the compile command.
-
-    @param cmd The entire command dictionary.
+    An object for finding and parsing the compile_commands.json file.
     '''
-    command = cmd['command']
+    COMPILE_COMMANDS_FILENAME = 'compile_commands.json'
 
-    for pattern in _PATTERNS:
-        command = re.sub(pattern, '', command)
+    # Patterns for get_relevant_args()
+    EXCLUDE_FLAGS = {
+        r'cc$': 1,
+        r'-c$': 1,
+        r'-o$': 2,
+        r'-g': 1,
+        r'-O.?$': 1
+    }
 
-    command = re.sub(r'\\"', '"', command)
-    return re.sub(r'\s+' + os.path.relpath(cmd['file'], start=cmd['directory']) + r'$', '', command).strip()
+    # Used to find args for files that are not in the compile commands, like most headers
+    __C_CPP_SOURCE_FILES_EXTENSIONS = [re.escape(ext) for ext in C_CPP_SOURCE_FILES_EXTENSIONS]
+
+    def __init__(self, *, commands_path: AnyStr = None, exclude_flags: Dict[Text, int] = None):
+        self.__commands_getter = None
+        if commands_path is not None:
+            if os.path.isdir(commands_path):
+                commands_path = os.path.join(commands_path, CommandsParser.COMPILE_COMMANDS_FILENAME)
+
+            if os.path.isfile(commands_path):
+                with open(commands_path) as commands_fd:
+                    commands = json.load(commands_fd)
+
+                self.__commands_getter = lambda filename: commands
+
+        if not self.__commands_getter:
+            self.__commands_getter = CommandsParser.__get_compile_commands
+
+        if exclude_flags is None:
+            exclude_flags = CommandsParser.EXCLUDE_FLAGS
+
+        self.exclude = exclude_flags
+
+    @staticmethod
+    def _find_compile_commands(start_at: AnyStr = None) -> AnyStr:
+        '''
+        Find the compile commands json file.
+
+        @param start_at Use this directory as a starting point. Defaults to cwd.
+        '''
+        if start_at is None:
+            start_at = os.getcwd()
+
+        cur_dir = os.path.abspath(start_at)
+        while CommandsParser.COMPILE_COMMANDS_FILENAME not in os.listdir(cur_dir):
+            prev_dir = cur_dir
+            cur_dir = os.path.abspath(os.path.join(cur_dir, os.pardir))
+            if cur_dir == prev_dir:
+                break
+        else:
+            return os.path.join(cur_dir, CommandsParser.COMPILE_COMMANDS_FILENAME)
+
+    @staticmethod
+    @lru_cache
+    def __get_compile_commands(filename: AnyStr) -> CompileCommands:
+        commands_filename = CommandsParser._find_compile_commands(os.path.dirname(filename))
+
+        if commands_filename and os.path.isfile(commands_filename):
+            with open(commands_filename) as commands_file:
+                return json.load(commands_file)
+        return []
+
+    @lru_cache
+    def _find_in_commands(self, filename: AnyStr) -> CompileCommandsEntry:
+        '''
+        Find the commands to compile `filename`.
+        `None` is returned if no such command is found.
+
+        @param filename The file to look for.
+        @param commands A compile_commands.json style dictionary.
+        '''
+        if isinstance(filename, bytes):
+            filename = filename.decode()
+
+        close_cmd = None
+        loose_match = re.compile(re.escape(os.path.splitext(filename)[0]) +
+                                 rf'(?:{"|".join(CommandsParser.__C_CPP_SOURCE_FILES_EXTENSIONS)})$')
+
+        commands = self.__commands_getter(filename)
+        for cmd in commands:
+            if cmd['file'] == filename:
+                return cmd
+
+            if loose_match.search(cmd['file']):
+                close_cmd = cmd
+
+        return close_cmd
+
+    @staticmethod
+    def __filter_by_regex(pattern: Pattern, remove_count: int, args: Iterable[Text]) -> Iterable[Text]:
+        assert remove_count >= 1
+
+        removing = 0
+        for arg in args:
+            if removing > 0:
+                removing -= 1
+            elif re.match(pattern, arg):
+                removing = remove_count - 1
+            else:
+                yield arg
+
+    @staticmethod
+    def __get_relevant_args(entry: CompileCommandsEntry) -> List[Text]:
+        '''
+        Get a list of relevant compilation flags from `command` field in the compile command.
+
+        @param entry The entire command dictionary.
+        '''
+        args = shlex.split(entry['command'])
+
+        for pattern, arg_count in CommandsParser.EXCLUDE_FLAGS.items():
+            args = CommandsParser.__filter_by_regex(pattern, arg_count, args)
+
+        # Unpack generators
+        args = list(args)
+
+        # Remove the file itself
+        if args[-1] == os.path.relpath(entry['file'], start=entry['directory']):
+            args.pop(-1)
+
+        return args
+
+    @staticmethod
+    def __common_flags(commands: CompileCommands) -> List[Text]:
+        '''
+        Get all flags that are common among for all files.
+
+        @param commands The compile commands.
+        '''
+        flags = None
+        for cmd in commands:
+            cmd_flags = set(CommandsParser.__get_relevant_args(cmd))
+            flags = flags & cmd_flags if flags is not None else cmd_flags
+        return list(flags)
+
+    @lru_cache
+    def get_args(self, filename: AnyStr) -> Tuple[Text, List[Text]]:
+        '''
+        Get the compilation parameters for `filename`.
+
+        @param filename     The name of the file. Use Clang.STDIN_FILENAME when using a non-file stdin.
+
+        @returns (compilation_directory, args_list)
+        '''
+        if os.path.isfile(filename):
+            filename = os.path.abspath(filename)
+
+            if cmd := self._find_in_commands(filename):
+                return cmd['directory'], CommandsParser.__get_relevant_args(cmd)
+
+        if compile_commands := self.__commands_getter(filename):
+            return compile_commands[0]['directory'], CommandsParser.__common_flags(compile_commands)
+
+        return os.getcwd(), []
 
 
-def common_flags(cmds):
+class Clang:
     '''
-    common_flags(cmds) -> [str]
-
-    Gets all flags that are used for all files.
-
-    @param cmds The compile commands.
+    An object for running clang plugins.
     '''
-    flags = None
-    for cmd in cmds:
-        cmd_flags = set(strip_cmds(cmd).split())
-        flags = flags & cmd_flags if flags is not None else cmd_flags
-    return list(flags)
+    STDIN_FILENAME = '-'
+    __FLAG_PREFIX = '-Xclang'
+    __LOAD_LIB_FLAG = '-load'
+    __RUN_PLUGIN_FLAG = '-plugin'  # Run as main command
+    __ADD_PLUGIN_FLAG = '-add-plugin'  # Run after main command
+    __SYNTAX_ONLY_FLAG = '-fsyntax-only'
 
+    def __init__(self, exec_path: AnyStr = 'clang++-10', *,
+                 commands_parser: Type[CommandsParser] = None,
+                 verbose: bool = False):
+        self.verbose = verbose
+        self.exec_path = exec_path
+        self.__plugins = {}
+        self.__compile_commands = commands_parser or CommandsParser()
 
-def get_params(filename, extra_args):
-    '''
-    get_params(filename, extra_args) -> (str, [str])
+    def run(self, filename: AnyStr, extra_args: Iterable[Text] = None, clang_args: Iterable[Text] = None, *,
+            get_stdout: bool = False, check: bool = False, **subprocess_kwargs) -> subprocess.CompletedProcess:
+        '''
+        Run clang on `filename`.
 
-    Gets compilation parameters for `filename`.
-    Returns the compile commands' args for `filename` and the compilation directory.
+        @param filename     The name of the file. Use Clang.STDIN_FILENAME when using a non-file stdin.
+        @param extra_args   Additional args to append to the compile commands' flags.
+        @param get_stdout   If `True`, return clang's stdout. Otherwise, return the exit code.
+        @param check        If `True` and the exit code was non-zero, raise a PluginError. The PluginError object will
+                            have the return code in the returncode attribute, and output & stderr attributes if those
+                            streams were captured (stderr is captured whenever the stderr argument is not provided and
+                            the verbose attribute is `False`).
+        @param subprocess_kwargs Additional args for subprocess, `text`, `shell` and `executable` are ignored.
 
-    @param filename The name of the file.
-    @param extra_args Additional args to append to the compile commands' flags.
-    '''
-    cmds = get_compile_commands(os.path.dirname(filename))
+        @returns CompletedProcess   The returned instance will have attributes args, returncode, stdout and stderr.
+                                    When stdout and stderr are not captured, and those attributes will be None.
+        '''
+        if filename != Clang.STDIN_FILENAME:
+            assert os.path.isfile(filename)
+            filename = os.path.abspath(filename)
 
-    filename = os.path.abspath(filename)
-    cmd = find_in_cmds(filename, cmds) or find_in_cmds(os.path.splitext(filename)[0] + '.cpp', cmds)
-    if cmd:
-        return cmd['directory'], strip_cmds(cmd).split() + extra_args
-    elif cmds:
-        return cmds[0]['directory'], common_flags(cmds) + extra_args
-    return os.curdir, extra_args
+        if extra_args is None:
+            extra_args = []
+        if not isinstance(extra_args, list):
+            extra_args = list(extra_args)
 
+        if clang_args is None:
+            clang_args = []
+        clang_args = list(chain(*((Clang.__FLAG_PREFIX, flag) for flag in clang_args)))
 
-def check_syntax(filename, extra_args):
-    '''
-    check_syntax(filename, extra_args) -> bool
-    Checks for syntax errors in `filename` using clang's -fsyntax-only.
+        run_dir, args = self.__compile_commands.get_args(filename)
 
-    @param filename The name of the file.
-    @param extra_args Additional args to append to the compile commands' flags.
-    '''
-    filename = os.path.abspath(filename)
-    org_dir = os.path.abspath(os.curdir)
+        error_stream = subprocess_kwargs.pop('stderr', None if self.verbose else subprocess.PIPE)
+        output_stream = subprocess_kwargs.pop('stdout', subprocess.PIPE if get_stdout else None)
 
-    run_dir, args = get_params(filename, extra_args)
+        # Ignore some keyword arguments:
+        subprocess_kwargs.pop('executable', None)
+        subprocess_kwargs.pop('shell', None)
+        subprocess_kwargs.pop('text', None)
 
-    os.chdir(run_dir)
-    exit_code = subprocess.call(['clang-10', '-fsyntax-only', '-x', 'c++'] + args + [os.path.relpath(filename)],
-                                stderr=None if VERBOSE else open(os.devnull, 'wb'))
+        with directory(run_dir):
+            proc = subprocess.run([self.exec_path, '-x', 'c++'] + clang_args + args + extra_args + [os.path.relpath(filename)],
+                                  stderr=error_stream, stdout=output_stream, text=True, check=False, **subprocess_kwargs)
 
-    os.chdir(org_dir)
-    return exit_code == 0
+        if check and proc.returncode != 0:
+            if self.verbose:
+                print("error: {!r} exited with {}.".format(proc.args[0], proc.returncode), file=sys.stderr)
+                print("command: {!r}".format(' '.join(proc.args)), file=sys.stderr)
+            raise PluginError(proc)
 
+        return proc
 
-def preprocess(filename, extra_args):
-    '''
-    preprocess(filename, extra_args) -> str
+    def check_syntax(self, filename: AnyStr, extra_args: Iterable[Text] = None, **subprocess_kwargs) -> bool:
+        '''
+        Check for syntax errors in `filename` using clang's -fsyntax-only.
 
-    Preprocess `filename`.
+        @param filename     The name of the file. Use Clang.STDIN_FILENAME when using a non-file stdin.
+        @param extra_args   Additional args to append to the compile commands' flags.
+        @param subprocess_kwargs Additional args for subprocess, `stderr`, `shell` and `executable` are ignored.
 
-    @param filename The name of the file.
-    @param extra_args Additional args to append to the compile commands' flags.
-    '''
-    filename = os.path.abspath(filename)
-    org_dir = os.path.abspath(os.curdir)
+        @returns bool
+        '''
+        return self.run(filename, extra_args=[Clang.__SYNTAX_ONLY_FLAG] + list(extra_args), **subprocess_kwargs).returncode == 0
 
-    try:
-        run_dir, args = get_params(filename, extra_args)
+    def preprocess(self, filename: AnyStr, extra_args: Iterable[Text] = None, **subprocess_kwargs) -> str:
+        '''
+        Preprocess `filename`.
 
-        os.chdir(run_dir)
-        preprocessed = subprocess.check_output(['clang-10', '-E', '-x', 'c++'] + args + [os.path.relpath(filename)],
-                                               stderr=None if VERBOSE else open(os.devnull, 'wb')).decode()
-    except subprocess.CalledProcessError as err:
-        print("error: {!r} exited with {}.".format(err.cmd[0], err.returncode), file=sys.stderr)
-        print("command: {}".format(' '.join(err.cmd)), file=sys.stderr)
-    finally:
-        os.chdir(org_dir)
+        @param filename     The name of the file. Use Clang.STDIN_FILENAME when using a non-file stdin.
+        @param extra_args   Additional args to append to the compile commands' flags.
+        @param subprocess_kwargs Additional args for subprocess, `stderr`, `shell` and `executable` are ignored.
 
-    # Remove preprocessor markings
-    preprocessed = re.sub(r'^#.*$', '', preprocess, flags=re.M)
+        @returns str
+        '''
+        output = self.run(filename, extra_args=['-E'] + list(extra_args),
+                          get_stdout=True, check=True, **subprocess_kwargs).stdout
 
-    # Trim whitespace
-    preprocessed = re.sub(r'\n\s*\n', '\n', preprocess, flags=re.M | re.S)
+        # Remove preprocessor markings
+        output = re.sub(r'^#.*$', '', output, flags=re.M)
 
-    return preprocessed
+        # Trim whitespace
+        output = re.sub(r'\n\s*\n', '\n', output, flags=re.M | re.S)
 
+        return output
 
-def run_plugin(filename, extra_args):
-    '''
-    preprocess(filename, extra_args) -> str
+    def run_plugin(self, plugin_lib: AnyStr, plugin_name: AnyStr, filename: AnyStr, extra_args: Iterable[Text] = None, *,
+                   get_stdout: bool = True, check: bool = False, **subprocess_kwargs) -> subprocess.CompletedProcess:
+        '''
+        Run clang with the specified plugin on `filename`.
 
-    Preprocess `filename`.
+        @param plugin_lib   The shared object file that contains the plugin.
+        @param plugin_name  The name of the plugin.
+        @param filename     The name of the file. Use Clang.STDIN_FILENAME when using a non-file stdin.
+        @param extra_args   Additional args to append to the compile commands' flags.
+        @param get_stdout   If `True`, return clang's stdout. Otherwise, return the exit code.
+        @param check        If `True` and the exit code was non-zero, raise a PluginError. The PluginError object will
+                            have the return code in the returncode attribute, and output & stderr attributes if those
+                            streams were captured (stderr is captured whenever the stderr argument is not provided and
+                            the verbose attribute is `False`).
+        @param subprocess_kwargs Additional args for subprocess, `stderr`, `shell` and `executable` are ignored.
 
-    @param filename The name of the file.
-    @param extra_args Additional args to append to the compile commands' flags.
-    '''
-    filename = os.path.abspath(filename)
-    plugin_lib = os.path.abspath(os.path.join(os.path.dirname(
-        os.path.abspath(__file__)), 'ConstantsDumperClangPlugin.so'))
+        @returns CompletedProcess   The returned instance will have attributes args, returncode, stdout and stderr.
+                                    When stdout and stderr are not captured, and those attributes will be None.
+        '''
+        plugin_lib = os.path.abspath(plugin_lib)
 
-    # TODO: Refactor this
+        return self.run(filename,
+                        extra_args=[Clang.__SYNTAX_ONLY_FLAG] + list(extra_args),
+                        clang_args=[Clang.__LOAD_LIB_FLAG, plugin_lib, Clang.__RUN_PLUGIN_FLAG, plugin_name],
+                        get_stdout=get_stdout,
+                        check=check,
+                        **subprocess_kwargs)
 
-    org_dir = os.path.abspath(os.curdir)
+    def register_plugin(self, plugin_lib: AnyStr, plugin_name: AnyStr):
+        '''
+        Register a plugin to run later.
 
-    try:
-        run_dir, args = get_params(filename, extra_args)
+        @param plugin_lib   The shared object file that contains the plugin.
+        @param plugin_name  The name of the plugin.
+        '''
+        self.__plugins[plugin_name] = plugin_lib
 
-        os.chdir(run_dir)
-        plugin_output = subprocess.check_output(
-            [
-                'clang-10', '-x', 'c++',
-                '-c', '-Xclang', '-load', '-Xclang', plugin_lib, '-Xclang', '-plugin', '-Xclang', 'ConstantsDumperClangPlugin'
-            ] + args + [os.path.relpath(filename)],
-            stderr=None if VERBOSE else open(os.devnull, 'wb')).decode()
-    except subprocess.CalledProcessError as err:
-        print("error: {!r} exited with {}.".format(err.cmd[0], err.returncode), file=sys.stderr)
-        print("command: {}".format(' '.join(err.cmd)), file=sys.stderr)
-    finally:
-        os.chdir(org_dir)
+    def run_plugins(self, filename: AnyStr, extra_args: Iterable[Text] = None, *,
+                    get_stdout: bool = True, check: bool = False, **subprocess_kwargs) -> subprocess.CompletedProcess:
+        '''
+        Run clang with the registered plugins on `filename`.
 
-    return plugin_output
+        @param filename     The name of the file. Use Clang.STDIN_FILENAME when using a non-file stdin.
+        @param extra_args   Additional args to append to the compile commands' flags.
+        @param get_stdout   If `True`, return clang's stdout. Otherwise, return the exit code.
+        @param check        If `True` and the exit code was non-zero, raise a PluginError. The PluginError object will
+                            have the return code in the returncode attribute, and output & stderr attributes if those
+                            streams were captured (stderr is captured whenever the stderr argument is not provided and
+                            the verbose attribute is `False`).
+        @param subprocess_kwargs Additional args for subprocess, `stderr`, `shell` and `executable` are ignored.
+
+        @returns CompletedProcess   The returned instance will have attributes args, returncode, stdout and stderr.
+                                    When stdout and stderr are not captured, and those attributes will be None.
+        '''
+        if extra_args is None:
+            extra_args = []
+
+        plugin_libs = list(chain(*{(Clang.__LOAD_LIB_FLAG, os.path.abspath(plugin_lib))
+                                   for plugin_lib in self.__plugins.values()}))
+        plugin_names = list(chain(*((Clang.__RUN_PLUGIN_FLAG, plugin) for plugin in self.__plugins)))
+
+        return self.run(filename,
+                        extra_args=[Clang.__SYNTAX_ONLY_FLAG] + list(extra_args),
+                        clang_args=plugin_libs + plugin_names,
+                        get_stdout=get_stdout,
+                        check=check,
+                        **subprocess_kwargs)
