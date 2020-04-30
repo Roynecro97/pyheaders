@@ -13,7 +13,7 @@ class ConstantsParser(ParserBase):
     '''
     Parses the constants outputted by the ConstantDumper clang plugin.
     '''
-    VALUE_MATCHER = re.compile(r'\s*(?P<name>(?:\w|::)+)\s*=\s*(?P<value>-?\d+)\s*,?\s*')
+    VALUE_MATCHER = re.compile(r'^\s*(?P<name>.+?)\s*=\s*(?P<value>.+?)\s*,?\s*$')
 
     def parse_line(self, line: Text, context: Context) -> bool:
         if value_match := ConstantsParser.VALUE_MATCHER.match(line):

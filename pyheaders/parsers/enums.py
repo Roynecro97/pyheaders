@@ -17,7 +17,7 @@ class EnumsParser(ParserBase):
     '''
     Parses the enums outputted by the ConstantDumper clang plugin.
     '''
-    ENUM_START_MATCHER = re.compile(r'\s*enum\s+(?P<name>\S+)\s*{\s*')
+    ENUM_START_MATCHER = re.compile(r'^\s*enum\s+(?P<name>.+?)\s*{\s*$')
     ENUM_END_MATCHER = re.compile(r'\s*}\s*')
     __ANONYMOUS_MATCHER = re.compile(r'\W+anonymous\W+', flags=re.I)
 

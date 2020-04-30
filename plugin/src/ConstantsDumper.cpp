@@ -39,7 +39,7 @@ public:
     bool VisitVarDecl(VarDecl *decl)
     {
         // Check only fundamental types
-        if (!decl->getType()->isFundamentalType())
+        if (!decl->getType()->isFundamentalType() || !decl->getType()->isIntegralType(decl->getASTContext()))
         {
             return true;
         }

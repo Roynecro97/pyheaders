@@ -6,6 +6,7 @@ import sys
 import argparse
 
 from . import load_path
+from .compiler import PluginError
 from .utils import enums, pretty_print, tree
 
 try:
@@ -36,7 +37,10 @@ def main():
 
     args, extra_args = parser.parse_known_args()
 
-    global_scope = load_path(args.file, extra_args, verbose=args.verbose)
+    try:
+        global_scope = load_path(args.file, extra_args, verbose=args.verbose)
+    except PluginError:
+        sys.exit(1)
 
     if args.tree:
         tree(global_scope)
