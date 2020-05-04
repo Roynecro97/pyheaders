@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cstdio>
 #include <iomanip>
+#include <ios>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -57,21 +58,15 @@ ostream &operator<<(ostream &os, const ValueInfo &value_info);
 
 ostream &operator<<(ostream &os, const CharInfo &char_info)
 {
-    constexpr auto dig_mask = 0b111;
-    constexpr auto get_dig = [](auto val, auto dig_idx) constexpr
-    {
-        return (val >> (dig_idx * 3)) & dig_mask;
-    };
-
     const auto [value, delim] = char_info;
 
     if (!isprint(static_cast<unsigned char>(value)))
     {
         os << escape_char;
-        for (auto i = 3; i > 0; --i)
-        {
-            os << get_dig(value, i - 1);
-        }
+        const auto old_fill = os.fill('0');
+        os << oct << setw(3) << +value;
+        os.unsetf(ios_base::oct);
+        os.fill(old_fill);
         return os;
     }
 
@@ -162,21 +157,9 @@ ostream &operator<<(ostream &os, const ValueInfo &value_info)
                     return os << char_delim << CharInfo(static_cast<char>(value.getInt().getExtValue()), char_delim) << char_delim;
                 }
             }
-            if (type->isWideCharType())
+            else
             {
-                return os << "wchar_t(" << value.getAsString(ast_context, type) << ")";
-            }
-            if (type->isChar8Type())
-            {
-                return os << "char8_t(" << value.getAsString(ast_context, type) << ")";
-            }
-            if (type->isChar16Type())
-            {
-                return os << "char16_t(" << value.getAsString(ast_context, type) << ")";
-            }
-            if (type->isChar32Type())
-            {
-                return os << "char32_t(" << value.getAsString(ast_context, type) << ")";
+                return os << type.getCanonicalType().getUnqualifiedType().getAsString() << "(" << value.getAsString(ast_context, type) << ")";
             }
         }
     }
@@ -243,7 +226,7 @@ ostream &operator<<(ostream &os, const ValueInfo &value_info)
     return os << value.getAsString(ast_context, type);
 }
 
-class ConstantsDumperClassVisitor : public RecursiveASTVisitor<ConstantsDumperClassVisitor>
+class ConstantsDumperVisitor : public RecursiveASTVisitor<ConstantsDumperVisitor>
 {
 public:
     bool VisitEnumDecl(EnumDecl *decl)
@@ -429,7 +412,7 @@ public:
     }
 
 private:
-    ConstantsDumperClassVisitor visitor;
+    ConstantsDumperVisitor visitor;
 };
 
 class ConstantsDumperASTAction : public PluginASTAction

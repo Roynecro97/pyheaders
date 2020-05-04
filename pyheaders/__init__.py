@@ -17,8 +17,8 @@ def _load_file(filename: _Path, /, extra_args: _Iterable[_Text] = None, *, verbo
 
     clang = compiler.Clang(verbose=verbose)
 
-    clang.register_plugin(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'plugins', 'ConstantsDumper.so'),
-                          'ConstantsDumper')
+    plugins_lib = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'plugins', 'ConstantsDumper.so')
+    clang.register_plugin(plugins_lib, 'ConstantsDumper')
 
     consts_txt = clang.run_plugins(filename, extra_args, check=True, **run_plugin_kwargs).stdout
 

@@ -113,6 +113,14 @@ def _str_type(name: Text, encoding: Text = 'utf-8'):
     return _mass_decoder
 
 
+def unknown_type(*fields):
+    '''
+    Fallback for unrecognized type names.
+    Returns a tuple of the arguments.
+    '''
+    return fields
+
+
 DEFAULT_TYPES = {
     'wchar_t': wchar_t,
     'char8_t': _char_type('char8_t', 'utf-8'),
@@ -145,11 +153,6 @@ def parse_value(raw_value: Text, /, scope: Optional[AnyScope] = None) -> Any:
         last_match = re.match(pattern, raw_value, flags=flags)
         return last_match
 
-    def get_type(typename: Text, /, default=None):
-        if typename in DEFAULT_TYPES:
-            return scope.get(typename, DEFAULT_TYPES[typename])
-        return scope.get(typename, default)
-
     # Any integer
     if match(r'^-?\d+$'):
         return int(last_match.group())
@@ -174,11 +177,14 @@ def parse_value(raw_value: Text, /, scope: Optional[AnyScope] = None) -> Any:
         params = (parse_value(param, scope)
                   for param in contextual_split(last_match.group('params')))
 
+        def get_type(typename: Text, /, default=None):
+            return scope.get(typename, DEFAULT_TYPES.get(typename, default))
+
         type_func = get_type(typename)
 
         # Couldn't find type, try without templates and default to a simple tuple
         if type_func is None:
-            type_func = get_type(remove_template(typename), default=lambda *fields: fields)
+            type_func = get_type(remove_template(typename), default=unknown_type)
 
         return type_func(*params)
 
