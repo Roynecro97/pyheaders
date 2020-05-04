@@ -6,7 +6,7 @@ from collections import namedtuple
 from keyword import iskeyword as _iskeyword
 from typing import Any, Iterable, List, Text, Tuple, Union
 
-from .scope import Scope
+from .scope import Scope, split
 
 
 class Record(Scope):
@@ -33,6 +33,8 @@ class Record(Scope):
                 seen[name] += 1
                 seen[new_name] = 1
             else:
+                if name.startswith('_'):
+                    name = name.lstrip('_')
                 safe_names.insert(0, name)
                 seen[name] = 1
         return safe_names
@@ -42,7 +44,7 @@ class Record(Scope):
 
         self.__name = name
         self.__fields = tuple(Record._safe_field_names(field_names))
-        self.__type = namedtuple(self.__name, self.__fields)
+        self.__type = namedtuple(split(self.__name)[-1], self.__fields)
 
     @property
     def name(self):

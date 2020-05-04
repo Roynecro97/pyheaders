@@ -15,7 +15,7 @@ from ..parser import Context, ParserBase
 
 class EnumsParser(ParserBase):
     '''
-    Parses the enums outputted by the ConstantDumper clang plugin.
+    Parses the enums outputted by the ConstantsDumper clang plugin.
     '''
     ENUM_START_MATCHER = re.compile(r'^\s*enum\s+(?P<name>.+?)\s*{\s*$')
     ENUM_END_MATCHER = re.compile(r'\s*}\s*')
