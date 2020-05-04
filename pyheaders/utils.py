@@ -28,7 +28,7 @@ def _tree(scope: Scope, indent: Text):
             print(prefix + item, '(enum)')
             _tree(scope[item], next_prefix)
         else:
-            print(prefix + item, '=', scope[item])
+            print(prefix + item, '=', repr(scope[item]))
 
 
 def tree(scope: Scope, indent: Text = ''):
@@ -63,7 +63,7 @@ def pretty_print(scope: Scope, indent: Text = ''):
             pretty_print(scope[item], indent + _PRETTY_PRINT_INDENT)
             print(indent + '}')
         else:
-            print(indent + item, '=', scope[item])
+            print(indent + item, '=', repr(scope[item]))
 
 
 def enums(scope: Scope) -> Iterable[Tuple[Text, Enum]]:
