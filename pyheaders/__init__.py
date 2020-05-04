@@ -6,7 +6,7 @@ into Python code.
 '''
 import os
 
-from typing import AnyStr as _Path, IO as _IO, Iterable as _Iterable, Text as _Text
+from typing import AnyStr as _Path, IO as _IO, Iterable as _Iterable, Text as _Text, Optional as _Optional
 
 from . import compiler, cpp, parser, parsers, utils
 
@@ -26,7 +26,8 @@ def _load_file(filename: _Path, /, extra_args: _Iterable[_Text] = None, *, verbo
     return consts_parser.parse(consts_txt, initial_scope=initial_scope, strict=True)
 
 
-def load_path(path: _Path, /, extra_args: _Iterable[_Text] = None, *, verbose: bool = False, **run_plugin_kwargs) -> cpp.Scope:
+def load_path(path: _Path, /, extra_args: _Iterable[_Text] = None, *, verbose: bool = False,
+              initial_scope: _Optional[cpp.Scope] = None, **run_plugin_kwargs) -> cpp.Scope:
     '''
     Load all constants from ``path`` (a ``str`` or ``bytes`` instance containing a
     path to a file or a directory containing C++ code) to a Python object.
@@ -36,15 +37,17 @@ def load_path(path: _Path, /, extra_args: _Iterable[_Text] = None, *, verbose: b
                         code extension are loaded.
     @param extra_args   Additional compilation arguments on top of the compile commands.
     @param verbose      If ``True`` is provided, don't suppress compiler errors.
+    @param initial_scope The initial scope to use, defaults to a new empty scope.
     @param run_plugin_kwargs Additional args for run_plugin().
 
     @returns Scope
     '''
     if os.path.isfile(path):
-        return _load_file(path, extra_args=extra_args, verbose=verbose, **run_plugin_kwargs)
+        return _load_file(path, extra_args=extra_args, verbose=verbose, initial_scope=initial_scope, **run_plugin_kwargs)
 
     if os.path.isdir(path):
-        global_scope = cpp.Scope()
+        if initial_scope is None:
+            initial_scope = cpp.Scope()
 
         source_files = (os.path.join(dirpath, filename) for dirpath, _, files in os.walk(path) for filename in files
                         if os.path.splitext(filename)[-1] in compiler.C_CPP_SOURCE_FILES_EXTENSIONS)
@@ -53,15 +56,16 @@ def load_path(path: _Path, /, extra_args: _Iterable[_Text] = None, *, verbose: b
 
             _load_file(filename, extra_args=extra_args,
                        verbose=verbose,
-                       initial_scope=global_scope,
+                       initial_scope=initial_scope,
                        **run_plugin_kwargs)
 
-        return global_scope
+        return initial_scope
 
     raise ValueError('path is neither a file nor a directory.')
 
 
-def loads(code: _Text, /, extra_args: _Iterable[_Text] = None, *, verbose: bool = False, **run_plugin_kwargs) -> cpp.Scope:
+def loads(code: _Text, /, extra_args: _Iterable[_Text] = None, *, verbose: bool = False,
+          initial_scope: _Optional[cpp.Scope] = None, **run_plugin_kwargs) -> cpp.Scope:
     '''
     Load all constants from ``code`` (a ``str`` instance containing C++ code) to a
     Python object.
@@ -69,14 +73,17 @@ def loads(code: _Text, /, extra_args: _Iterable[_Text] = None, *, verbose: bool 
     @param code         The code to load.
     @param extra_args   Additional compilation arguments on top of the compile commands.
     @param verbose      If ``True`` is provided, don't suppress compiler errors.
+    @param initial_scope The initial scope to use, defaults to a new empty scope.
     @param run_plugin_kwargs Additional args for run_plugin().
 
     @returns Scope
     '''
-    return _load_file(compiler.Clang.STDIN_FILENAME, extra_args=extra_args, verbose=verbose, input=code, **run_plugin_kwargs)
+    return _load_file(compiler.Clang.STDIN_FILENAME, extra_args=extra_args, verbose=verbose,
+                      initial_scope=initial_scope, input=code, **run_plugin_kwargs)
 
 
-def load(source_file: _IO, /, extra_args: _Iterable[_Text] = None, *, verbose: bool = False, **run_plugin_kwargs) -> cpp.Scope:
+def load(source_file: _IO, /, extra_args: _Iterable[_Text] = None, *, verbose: bool = False,
+         initial_scope: _Optional[cpp.Scope] = None, **run_plugin_kwargs) -> cpp.Scope:
     '''
     Load all constants from ``source_file`` (a ``.read()``-supporting file-like object
     containing C++ code) to a Python object.
@@ -84,8 +91,9 @@ def load(source_file: _IO, /, extra_args: _Iterable[_Text] = None, *, verbose: b
     @param source_file  The file to load.
     @param extra_args   Additional compilation arguments on top of the compile commands.
     @param verbose      If ``True`` is provided, don't suppress compiler errors.
+    @param initial_scope The initial scope to use, defaults to a new empty scope.
     @param run_plugin_kwargs Additional args for run_plugin().
 
     @returns Scope
     '''
-    return loads(source_file.read(), extra_args=extra_args, verbose=verbose, **run_plugin_kwargs)
+    return loads(source_file.read(), extra_args=extra_args, verbose=verbose, initial_scope=initial_scope, **run_plugin_kwargs)
