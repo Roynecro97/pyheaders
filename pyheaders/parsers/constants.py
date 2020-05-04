@@ -7,6 +7,7 @@ import re
 from typing import Optional, Text
 
 from ..parser import Context, ParserBase
+from ..cpp.types import parse_value
 
 
 class ConstantsParser(ParserBase):
@@ -19,9 +20,7 @@ class ConstantsParser(ParserBase):
         value_match: Optional[re.Match]
         if value_match := ConstantsParser.VALUE_MATCHER.match(line):
             name = value_match.group('name')
-            value = value_match.group('value')
-            if re.match(r'-?\d+$', value):
-                value = int(value)
+            value = parse_value(value_match.group('value'))
             context.global_scope[name] = value
 
         return bool(value_match)
