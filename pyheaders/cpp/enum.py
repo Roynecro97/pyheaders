@@ -17,27 +17,21 @@ class Enum:
         self._items = OrderedDict(items)
 
     def __getitem__(self, name):
-        if isinstance(name, str):
+        if name in self._items:
             return self._items[name]
-        elif isinstance(name, int):
+        else:
             value = name
             if name not in self._items.values():
                 # TODO: improve
                 raise KeyError
             return [name for name, val in self._items.items() if val == value][0]
-        else:
-            raise TypeError("Parameter must be a str or an int.")
 
     def __setitem__(self, name, value):
         if not isinstance(name, str):
             raise TypeError("name must be a str.")
-        if not isinstance(value, int):
-            raise TypeError("value must be an int.")
         self._items[name] = value
 
     def __contains__(self, item):
-        if not isinstance(item, (str, int)):
-            raise TypeError("item must be a str or an int.")
         return item in self._items or item in self._items.values()
 
     def __iter__(self):
