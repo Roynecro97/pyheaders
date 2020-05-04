@@ -7,6 +7,8 @@ import re
 from collections import OrderedDict
 from typing import Any, Text, Optional, Pattern, Tuple
 
+from .types import TEMPLATE_START, TEMPLATE_END
+
 
 class Scope(OrderedDict):
     '''
@@ -16,8 +18,6 @@ class Scope(OrderedDict):
     # Equivalent to: \([^:()]*\banonymous\b[^:()]*\)::
     ANONYMOUS_NAMESPACE: Pattern = rf'\([^{SEP}()]*\banonymous\b[^{SEP}()]*\){SEP}'
 
-    _TEMPLATE_START = '<'
-    _TEMPLATE_END = '>'
     _PLACEHOLDER = '@'
     assert _PLACEHOLDER not in SEP
 
@@ -30,9 +30,9 @@ class Scope(OrderedDict):
         template_level = 0
         i = 0
         while i < len(name):
-            if name[i] == Scope._TEMPLATE_START:
+            if name[i] == TEMPLATE_START:
                 template_level += 1
-            elif name[i] == Scope._TEMPLATE_END:
+            elif name[i] == TEMPLATE_END:
                 template_level -= 1
 
             if name.find(Scope.SEP, i, i + len(Scope.SEP)) == i and template_level:
