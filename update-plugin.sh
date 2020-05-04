@@ -2,6 +2,8 @@
 
 cd "$(dirname "$BASH_SOURCE")"
 
+mkdir -p ./pyheaders/plugins
+
 BUILDER="$(readlink -f ./build.sh)"
 DEST="$(readlink -f ./pyheaders/plugins/ConstantsDumper.so)"
 

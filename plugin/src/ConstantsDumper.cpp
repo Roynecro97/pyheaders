@@ -4,11 +4,13 @@
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendPluginRegistry.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <iomanip>
 #include <ios>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -49,10 +51,33 @@ using CharInfo = tuple<char, char>;
 using StructInfo = tuple<const APValue &, const QualType &, const ASTContext &, bool>;
 //                          value,          type                context
 using ValueInfo = tuple<const APValue &, const QualType &, const ASTContext &>;
+//                              record,         last
+using RecordInfo = tuple<const CXXRecordDecl *, bool>;
 
 inline constexpr auto char_delim = '\'';
 inline constexpr auto string_delim = '"';
 inline constexpr auto escape_char = '\\';
+
+static inline bool hasAnyFields(const CXXRecordDecl *decl);
+
+static inline bool baseHasAnyFields(const CXXBaseSpecifier &base)
+{
+    return hasAnyFields(base.getType()->getAsCXXRecordDecl());
+}
+
+static inline bool hasAnyFields(const CXXRecordDecl *decl)
+{
+    if (decl == nullptr)
+    {
+        return false;
+    }
+
+    if (!decl->field_empty())
+    {
+        return true;
+    }
+    return any_of(decl->bases_begin(), decl->bases_end(), baseHasAnyFields);
+}
 
 ostream &operator<<(ostream &os, const ValueInfo &value_info);
 
@@ -96,8 +121,11 @@ ostream &operator<<(ostream &os, const StructInfo &struct_info)
         if (base_iter != base_end)
         {
             const auto &base_type = base_iter->getType();
+
+            const auto last_base_with_fields = i == base_count - 1 || none_of(next(base_iter), base_end, baseHasAnyFields);
+
             os << StructInfo(base, base_type, ast_context,
-                             i == base_count - 1 && field_count == 0 && last);
+                             last_base_with_fields && field_count == 0 && last);
             ++base_iter;
         }
         else
@@ -214,16 +242,45 @@ ostream &operator<<(ostream &os, const ValueInfo &value_info)
         }
         if (type->isRecordType() && value.isStruct())
         {
-            auto class_name = type.getCanonicalType().getUnqualifiedType().getAsString();
-            // Actual name starts after "struct " or "class "
-            const auto actual_begin = class_name.find(' ') + 1;
-            return os << class_name.substr(actual_begin, class_name.size() - actual_begin)
-                      << "(" << StructInfo(value, type, ast_context, true) << ")";
+            const auto record_decl = type->getAsCXXRecordDecl();
+            if (!record_decl->getNameAsString().empty())
+            {
+                os << record_decl->getQualifiedNameAsString();
+            }
+            return os << "(" << StructInfo(value, type, ast_context, true) << ")";
         }
     }
 
     // Default for all types that don't require special handling (ie: most `int`s, `float`, ...)
     return os << value.getAsString(ast_context, type);
+}
+
+ostream &operator<<(ostream &os, const RecordInfo &record_info)
+{
+    auto &&[decl, last] = record_info;
+
+    const auto empty = decl->field_empty();
+
+    auto base_end = decl->bases_end();
+    for (auto base_iter = decl->bases_begin(); base_iter != base_end; ++base_iter)
+    {
+        auto next_base = next(base_iter);
+        const auto last_base_with_fields = next_base == base_end || none_of(next_base, base_end, baseHasAnyFields);
+
+        os << RecordInfo(base_iter->getType()->getAsCXXRecordDecl(),
+                         last_base_with_fields && empty && last);
+    }
+
+    auto field_end = decl->field_end();
+    for (auto field_iter = decl->field_begin(); field_iter != field_end; ++field_iter)
+    {
+        os << field_iter->getNameAsString();
+        if (next(field_iter) != field_end || !last)
+        {
+            os << ",";
+        }
+    }
+    return os;
 }
 
 class ConstantsDumperVisitor : public RecursiveASTVisitor<ConstantsDumperVisitor>
@@ -290,21 +347,6 @@ public:
 
             DBG(recordDecl->getNameAsString());
             DBG(recordDecl->getQualifiedNameAsString());
-            // cout << decl->getType().getUnqualifiedType().getAsString();
-            // if (!recordDecl->bases().empty())
-            // {
-            //     cout << " :";
-            //     for (auto &&base : recordDecl->bases())
-            //     {
-            //         cout << " " << base.getType().getAsString() << ",";
-            //     }
-            // }
-            // cout << " {" << endl;
-            // for (auto *fieldDecl : recordDecl->fields())
-            // {
-            //     cout << fieldDecl->getNameAsString() << ": " << fieldDecl->getType().getUnqualifiedType().getAsString() << "," << endl;
-            // }
-            // cout << "}" << endl;
         }
         if (decl->getEvaluatedValue())
         {
@@ -429,6 +471,149 @@ public:
         return true;
     }
 };
+
+class LiteralTypesDumperVisitor : public RecursiveASTVisitor<LiteralTypesDumperVisitor>
+{
+public:
+    bool VisitCXXRecordDecl(CXXRecordDecl *decl)
+    {
+        DBG_NOTE(--------------------------);
+        DBG_NOTE(Enter VisitCXXRecordDecl());
+
+        DBG(decl->getNameAsString());          // bar
+        DBG(decl->getQualifiedNameAsString()); // foo::bar
+        DBG(decl->hasDefinition());
+        DBG(decl->isLambda());
+        DBG(decl->isTemplated());
+
+        if (decl->getNameAsString().empty())
+        {
+            DBG_NOTE(Leave VisitCXXRecordDecl()[anonymous]);
+            DBG_NOTE(--------------------------);
+
+            return true;
+        }
+
+        if (!decl->hasDefinition())
+        {
+            DBG_NOTE(Leave VisitCXXRecordDecl()[no definition]);
+            DBG_NOTE(--------------------------);
+
+            return true;
+        }
+
+        DBG(decl->isLiteral());
+
+        if (decl->isLambda())
+        {
+            DBG_NOTE(Leave VisitCXXRecordDecl()[lambda]);
+            DBG_NOTE(--------------------------);
+
+            return true;
+        }
+
+        if (!decl->isLiteral())
+        {
+            DBG_NOTE(Leave VisitCXXRecordDecl()[not literal]);
+            DBG_NOTE(--------------------------);
+
+            return true;
+        }
+
+        if (!hasAnyFields(decl))
+        {
+            DBG_NOTE(Leave VisitCXXRecordDecl()[empty]);
+            DBG_NOTE(--------------------------);
+
+            return true;
+        }
+
+#ifdef DEBUG_PLUGIN
+        if (decl->getDescribedTemplate())
+        {
+            DBG(decl->getDescribedTemplate()->getNameAsString());
+            DBG(decl->getDescribedTemplate()->getQualifiedNameAsString());
+        }
+
+        if (decl->getDescribedClassTemplate())
+        {
+            DBG(decl->getDescribedClassTemplate()->getNameAsString());
+            DBG(decl->getDescribedClassTemplate()->getQualifiedNameAsString());
+        }
+
+        for (unsigned i = 0; i < decl->getNumTemplateParameterLists(); ++i)
+        {
+            DBG(i);
+            auto param_list = decl->getTemplateParameterList(i);
+            DBG(param_list != nullptr);
+            if (param_list)
+            {
+                DBG(param_list->size());
+                for (auto &&param : *param_list)
+                {
+                    DBG(param->getNameAsString());
+                    DBG(param->getQualifiedNameAsString());
+                }
+            }
+        }
+
+        for (auto &&base : decl->bases())
+        {
+            DBG(base.getType().getQualifiers().getAsString());
+            DBG(base.getType().getCanonicalType().getUnqualifiedType().getAsString());
+            DBG(base.getType().getCanonicalType().getAsString());
+            DBG(base.getType().getUnqualifiedType().getAsString());
+            DBG(base.getType().getAsString());
+        }
+
+        for (auto &&field : decl->fields())
+        {
+            DBG(field->getNameAsString());
+            DBG(field->getQualifiedNameAsString());
+            DBG(field->getType().getQualifiers().getAsString());
+            DBG(field->getType().getCanonicalType().getUnqualifiedType().getAsString());
+            DBG(field->getType().getCanonicalType().getAsString());
+            DBG(field->getType().getUnqualifiedType().getAsString());
+            DBG(field->getType().getAsString());
+        }
+#endif // DEBUG_PLUGIN
+
+        cout << decl->getQualifiedNameAsString() << "{" << RecordInfo(decl, true) << "}" << endl;
+
+        DBG_NOTE(Leave VisitCXXRecordDecl());
+        DBG_NOTE(--------------------------);
+
+        return true;
+    }
+};
+
+class LiteralTypesDumperConsumer : public ASTConsumer
+{
+public:
+    void HandleTranslationUnit(ASTContext &context)
+    {
+        visitor.TraverseDecl(context.getTranslationUnitDecl());
+    }
+
+private:
+    LiteralTypesDumperVisitor visitor;
+};
+
+class LiteralTypesDumperASTAction : public PluginASTAction
+{
+public:
+    virtual unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &Compiler, llvm::StringRef InFile)
+    {
+        return make_unique<LiteralTypesDumperConsumer>();
+    }
+
+    bool ParseArgs(const CompilerInstance &CI,
+                   const vector<string> &args)
+    {
+        return true;
+    }
+};
 } // namespace
 
+static clang::FrontendPluginRegistry::Add<LiteralTypesDumperASTAction> Y("TypesDumper", "Dumps all class / struct literal types from the code");
 static clang::FrontendPluginRegistry::Add<ConstantsDumperASTAction> X("ConstantsDumper", "Dumps all constants and enums from the code");
