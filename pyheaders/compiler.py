@@ -420,7 +420,7 @@ class Clang:
 
         plugin_libs = list(chain(*{(Clang.__LOAD_LIB_FLAG, os.path.abspath(plugin_lib))
                                    for plugin_lib in self.__plugins.values()}))
-        plugin_names = list(chain(*((Clang.__RUN_PLUGIN_FLAG, plugin) for plugin in self.__plugins)))
+        plugin_names = list(chain(*((Clang.__ADD_PLUGIN_FLAG, plugin) for plugin in self.__plugins)))
 
         return self.run(filename,
                         extra_args=[Clang.__SYNTAX_ONLY_FLAG] + list(extra_args),
