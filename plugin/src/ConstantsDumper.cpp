@@ -184,7 +184,7 @@ ostream &operator<<(ostream &os, const ValueInfo &value_info)
     {
         if (type->isPointerType() && type->getPointeeOrArrayElementType()->isAnyCharacterType())
         {
-            auto str = value.getAsString(ast_context, type);
+            const auto str = value.getAsString(ast_context, type);
             // content includes the delimiters
             const auto content_begin = str.find(string_delim);
             const auto content_end = str.rfind(string_delim) + 1;
@@ -231,7 +231,11 @@ ostream &operator<<(ostream &os, const ValueInfo &value_info)
         }
         if (type->isRecordType() && value.isStruct())
         {
-            return os << "(" << StructInfo(value, type, ast_context, true) << ")";
+            auto class_name = type.getCanonicalType().getUnqualifiedType().getAsString();
+            // Actual name starts after "struct " or "class "
+            const auto actual_begin = class_name.find(' ') + 1;
+            return os << class_name.substr(actual_begin, class_name.size() - actual_begin)
+                      << "(" << StructInfo(value, type, ast_context, true) << ")";
         }
     }
 

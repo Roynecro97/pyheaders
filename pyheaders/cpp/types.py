@@ -178,7 +178,7 @@ def parse_value(raw_value: Text, /, scope: Optional[AnyScope] = None) -> Any:
 
         # Couldn't find type, try without templates and default to a simple tuple
         if type_func is None:
-            type_func = get_type(remove_template(typename), default=tuple)
+            type_func = get_type(remove_template(typename), default=lambda *fields: fields)
 
         return type_func(*params)
 
