@@ -6,7 +6,7 @@ from collections import namedtuple
 from keyword import iskeyword
 from typing import Any, Iterable, List, Text, Tuple, Union
 
-from .scope import Scope, split
+from .scope import Scope, split, normalize
 from .types import remove_template
 
 
@@ -42,7 +42,7 @@ class Record(Scope):
     def __init__(self, name: Text, field_names: Union[Text, Iterable[Text]], base_scope: Iterable[Tuple[Text, Any]] = None):
         super().__init__(base_scope or [])
 
-        self.__name = name
+        self.__name = normalize(name)
         self.__fields = tuple(Record._safe_field_names(field_names))
 
         module, name = split(remove_template(self.__name))
@@ -71,4 +71,4 @@ class Record(Scope):
         scope_repr = ''
         if self:
             scope_repr = f', Scope{super().__repr__()[len(type(self).__name__):]}'
-        return f'{type(self).__name__}({self.name!r}, *{self.__fields!r}{scope_repr})'
+        return f'{type(self).__name__}({self.name!r}, {self.__fields!r}{scope_repr})'
