@@ -18,11 +18,16 @@ def _load_file(filename: _Path, /, extra_args: _Iterable[_Text] = None, *, verbo
     clang = compiler.Clang(verbose=verbose)
 
     plugins_lib = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'plugins', 'ConstantsDumper.so')
+    clang.register_plugin(plugins_lib, 'TypesDumper')
     clang.register_plugin(plugins_lib, 'ConstantsDumper')
 
     consts_txt = clang.run_plugins(filename, extra_args, check=True, **run_plugin_kwargs).stdout
 
-    consts_parser = parser.Parser(parsers.enums.EnumsParser(), parsers.constants.ConstantsParser())
+    consts_parser = parser.Parser(
+        parsers.RecordsParser(),
+        parsers.enums.EnumsParser(),
+        parsers.constants.ConstantsParser()
+    )
     return consts_parser.parse(consts_txt, initial_scope=initial_scope, strict=True)
 
 

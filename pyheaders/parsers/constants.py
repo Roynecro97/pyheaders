@@ -12,7 +12,7 @@ from ..cpp.types import parse_value
 
 class ConstantsParser(ParserBase):
     '''
-    Parses the constants outputted by the ConstantDumper clang plugin.
+    Parses the constants outputted by the ConstantsDumper clang plugin.
     '''
     VALUE_MATCHER = re.compile(r'^\s*(?P<name>.+?)\s*=\s*(?P<value>.+?)\s*,?\s*$')
 
@@ -20,7 +20,7 @@ class ConstantsParser(ParserBase):
         value_match: Optional[re.Match]
         if value_match := ConstantsParser.VALUE_MATCHER.match(line):
             name = value_match.group('name')
-            value = parse_value(value_match.group('value'))
+            value = parse_value(value_match.group('value'), context.global_scope)
             context.global_scope[name] = value
 
         return bool(value_match)

@@ -5,7 +5,7 @@ Represents a C++ scope (namespace, class, enum class, ...).
 import re
 
 from collections import OrderedDict
-from typing import Any, Text, Optional, Pattern, Tuple
+from typing import Any, Optional, Pattern, Text, Tuple
 
 from .types import TEMPLATE_START, TEMPLATE_END
 
