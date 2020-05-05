@@ -11,7 +11,7 @@ import sys
 from contextlib import contextmanager
 from functools import lru_cache
 from itertools import chain
-from typing import AnyStr, Dict, Iterable, List, Pattern, Text, Tuple, Type
+from typing import AnyStr, Dict, Iterable, List, Pattern, Text, Tuple
 from warnings import warn
 
 
@@ -269,7 +269,7 @@ class Clang:
     __SYNTAX_ONLY_FLAG = '-fsyntax-only'
 
     def __init__(self, exec_path: AnyStr = 'clang++-10', *,
-                 commands_parser: Type[CommandsParser] = None,
+                 commands_parser: CommandsParser = None,
                  verbose: bool = False):
         self.verbose = verbose
         self.exec_path = exec_path
