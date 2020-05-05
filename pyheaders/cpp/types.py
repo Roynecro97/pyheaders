@@ -7,20 +7,48 @@ and constructor parameters.
 import re
 import sys
 
-from typing import Any, AnyStr, Dict, Optional, Text
+from typing import Any, AnyStr, Dict, List, Optional, Text, Tuple
 
 AnyScope = Dict[Text, Any]
 
+PARENS_START = '('
+PARENS_END = ')'
 TEMPLATE_START = '<'
 TEMPLATE_END = '>'
 
+ALL_BRACKETS = {PARENS_START: PARENS_END, '[': ']', '{': '}', TEMPLATE_START: TEMPLATE_END}
+assert all(len(start) == len(end) == 1 for start, end in ALL_BRACKETS.items())
 
-def contextual_split(txt, sep=',', brackets=None):
+
+def has_valid_brackets(txt: Text, brackets: Dict[Text, Text] = None) -> bool:
+    '''
+    Check if all brackets in ``txt`` are closed.
+    '''
+    if brackets is None:
+        brackets = ALL_BRACKETS
+    assert len(brackets) == len(set(brackets.values())), "The same close bracket should not be used for 2 open brackets"
+
+    r_brackets = {end: begin for begin, end in brackets.items()}
+    bracket_stack = []
+
+    for char in txt:
+        if char in brackets:
+            bracket_stack.append(char)
+        if char in r_brackets:
+            # Close bracket without a matching open
+            if not bracket_stack or bracket_stack.pop() != r_brackets[char]:
+                return False
+    return True
+
+
+def contextual_split(txt: Text, sep: Text = ',', brackets: Dict[Text, Text] = None) -> List[Text]:
     '''
     Split contextually and remove redundant whitespaces.
     '''
     if brackets is None:
-        brackets = {'(': ')', '[': ']', '{': '}', TEMPLATE_START: TEMPLATE_END}
+        brackets = ALL_BRACKETS
+    assert len(brackets) == len(set(brackets.values())), "The same close bracket should not be used for 2 open brackets"
+
     r_brackets = {end: begin for begin, end in brackets.items()}
     bracket_stack = []
 
@@ -41,6 +69,34 @@ def contextual_split(txt, sep=',', brackets=None):
             res.append(char)
 
     return [part.strip() for part in res]
+
+
+def _func_split(call_string: Text) -> Tuple[Text, Text]:
+    '''
+    Split a function (a constructor call) from its parameters.
+    This assumes the ``call_string`` is valid.
+
+    Returns (str, str) of (func_name, params)
+    '''
+
+    assert call_string.endswith(PARENS_END) and call_string.count(PARENS_START) == call_string.count(PARENS_END)
+
+    # Find parameters start
+    parens_level = 0
+    for i in range(len(call_string) - 1, -1, -1):  # [len(call_string) - 1, 0]
+        if call_string[i] == PARENS_END:
+            parens_level += 1
+        elif call_string[i] == PARENS_START:
+            parens_level -= 1
+
+        # We will not reach negative parens_level because call_string ends with PARENS_END
+        if parens_level == 0:
+            params_start = i
+            break
+    else:
+        raise ValueError(f"Invalid C++ function call: {call_string!r}")
+
+    return call_string[:params_start], call_string[params_start + 1:-1]
 
 
 def remove_template(name):
@@ -162,20 +218,19 @@ def parse_value(raw_value: Text, /, scope: Optional[AnyScope] = None) -> Any:
         return float(last_match.group())
 
     # char or string
-    if match(r'''^(?P<quote>'|").+(?P=quote)$'''):
+    if match(r'''^(?P<quote>'|").*(?P=quote)$'''):
         # Reevaluate escaped characters
         return eval(last_match.group())  # pylint: disable=eval-used
 
     # Arrays
     if match(r'^\((?P<elements>.*)\)$'):
-        return [parse_value(element, scope)
-                for element in contextual_split(last_match.group('elements'))]
+        if has_valid_brackets(elements := last_match.group('elements')):
+            return [parse_value(element, scope) for element in contextual_split(elements)]
 
     # Named types
     if match(r'^(?P<type>.+?)\((?P<params>.*)\)$'):
-        typename = last_match.group('type')
-        params = (parse_value(param, scope)
-                  for param in contextual_split(last_match.group('params')))
+        typename, params = _func_split(last_match.group())
+        params = (parse_value(param, scope) for param in contextual_split(params))
 
         def get_type(typename: Text, /, default=None):
             return scope.get(typename, DEFAULT_TYPES.get(typename, default))
