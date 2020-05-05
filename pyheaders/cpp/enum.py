@@ -2,52 +2,44 @@
 Represents a C++ enum.
 '''
 from collections import OrderedDict
+from typing import Any, Optional, Text, Union
 
 
-class Enum:
+class Enum(OrderedDict):
     '''
     Represents a C++ enum.
     '''
 
     def __init__(self, name, items=None):
-        # TODO: validate types
-        if items is None:
-            items = []
+        super().__init__(items or [])
         self.name = name
-        self._items = OrderedDict(items)
 
-    def __getitem__(self, name):
-        if name in self._items:
-            return self._items[name]
-        else:
-            value = name
-            if name not in self._items.values():
-                # TODO: improve
-                raise KeyError
-            return [name for name, val in self._items.items() if val == value][0]
+    def __getitem__(self, name: Union[Text, Any]) -> Union[Any, Text]:
+        if name in self.keys():
+            return super().__getitem__(name)
 
-    def __setitem__(self, name, value):
+        for key, value in self.items():
+            if name == value:
+                return key
+
+        raise KeyError(name)
+
+    def __setitem__(self, name: Text, value: Any):
         if not isinstance(name, str):
             raise TypeError("name must be a str.")
-        self._items[name] = value
 
-    def __contains__(self, item):
-        return item in self._items or item in self._items.values()
+        if not name.isidentifier():
+            raise ValueError("name must be a valid identifier.")
 
-    def __iter__(self):
-        return iter(self._items)
+        super().__setitem__(name, value)
 
-    def __len__(self):
-        return len(self._items)
+    def get(self, key: Text, default: Optional[Any] = None, /):
+        if key in self:
+            return self[key]
+        return default
 
-    def keys(self):
-        return self._items.keys()
-
-    def values(self):
-        return self._items.values()
-
-    def items(self):
-        return self._items.items()
+    def __contains__(self, name: Text):
+        return name in self.keys() or name in self.values()
 
     def __str__(self):
         return 'enum {}'.format(self.name)
