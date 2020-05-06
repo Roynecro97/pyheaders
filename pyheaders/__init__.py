@@ -6,14 +6,30 @@ into Python code.
 '''
 import os
 
-from typing import AnyStr as _Path, IO as _IO, Iterable as _Iterable, Text as _Text
+from typing import AnyStr as _Path, Dict as _Dict, IO as _IO, Iterable as _Iterable, Text as _Text, Tuple as _Tuple
+from dataclasses import dataclass as _dataclass, field as _field
 
 from . import compiler, cpp, parser, parsers, utils
+
+@_dataclass
+class SrcData:
+    '''
+    dataclass used to store the returned values from pyheaders' API.
+    '''
+    scope: cpp.Scope = _field(default_factory=cpp.Scope)
+    macros: _Dict[_Text, _Text] = _field(default_factory=dict)
+
+    def update(self, other):
+        '''
+        Updates its data with the data of another SrcData object.
+        '''
+        self.scope.update(other.scope)
+        self.macros.update(other.macros)
 
 
 def _load_file(filename: _Path, /, extra_args: _Iterable[_Text] = None, *, verbose: bool = False,
                initial_scope: cpp.Scope = None, exec_path: _Path = None,
-               commands_parser: compiler.CommandsParser = None, **run_plugin_kwargs) -> cpp.Scope:
+               commands_parser: compiler.CommandsParser = None, **run_plugin_kwargs) -> SrcData:
     assert os.path.isfile(filename) or filename == compiler.Clang.STDIN_FILENAME
 
     if exec_path:
@@ -32,12 +48,14 @@ def _load_file(filename: _Path, /, extra_args: _Iterable[_Text] = None, *, verbo
         parsers.enums.EnumsParser(),
         parsers.constants.ConstantsParser()
     )
-    return consts_parser.parse(consts_txt, initial_scope=initial_scope, strict=True)
+
+    return SrcData(consts_parser.parse(consts_txt, initial_scope=initial_scope, strict=True),
+                   clang.get_macros(filename, extra_args, **run_plugin_kwargs))
 
 
 def load_path(path: _Path, /, extra_args: _Iterable[_Text] = None, *, verbose: bool = False,
               initial_scope: cpp.Scope = None, clang_path: _Path = None,
-              commands_parser: compiler.CommandsParser = None, **run_plugin_kwargs) -> cpp.Scope:
+              commands_parser: compiler.CommandsParser = None, **run_plugin_kwargs) -> SrcData:
     '''
     Load all constants from ``path`` (a ``str`` or ``bytes`` instance containing a
     path to a file or a directory containing C++ code) to a Python object.
@@ -58,27 +76,27 @@ def load_path(path: _Path, /, extra_args: _Iterable[_Text] = None, *, verbose: b
         return _load_file(path, extra_args=extra_args, verbose=verbose, initial_scope=initial_scope, **run_plugin_kwargs)
 
     if os.path.isdir(path):
-        if initial_scope is None:
-            initial_scope = cpp.Scope()
+        returned_data = SrcData()
+        if initial_scope is not None:
+            returned_data.scope = initial_scope
 
         source_files = (os.path.join(dirpath, filename) for dirpath, _, files in os.walk(path) for filename in files
                         if os.path.splitext(filename)[-1] in compiler.C_CPP_SOURCE_FILES_EXTENSIONS)
         for filename in source_files:
             filename = os.path.join(path, filename)
 
-            _load_file(filename, extra_args=extra_args, verbose=verbose,
-                       initial_scope=initial_scope, exec_path=clang_path,
-                       commands_parser=commands_parser,
-                       **run_plugin_kwargs)
+            returned_data.update(_load_file(filename, extra_args=extra_args, verbose=verbose,
+                                            initial_scope=returned_data.scope, exec_path=clang_path,
+                                            commands_parser=commands_parser, **run_plugin_kwargs))
 
-        return initial_scope
+        return returned_data
 
     raise ValueError('path is neither a file nor a directory.')
 
 
 def loads(code: _Text, /, extra_args: _Iterable[_Text] = None, *, verbose: bool = False,
           initial_scope: cpp.Scope = None, clang_path: _Path = None,
-          commands_parser: compiler.CommandsParser = None, **run_plugin_kwargs) -> cpp.Scope:
+          commands_parser: compiler.CommandsParser = None, **run_plugin_kwargs) -> SrcData:
     '''
     Load all constants from ``code`` (a ``str`` instance containing C++ code) to a
     Python object.

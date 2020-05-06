@@ -277,7 +277,8 @@ class Clang:
         self.__compile_commands = commands_parser or CommandsParser()
 
     def run(self, filename: AnyStr, extra_args: Iterable[Text] = None, clang_args: Iterable[Text] = None, *,
-            get_stdout: bool = False, check: bool = False, **subprocess_kwargs) -> subprocess.CompletedProcess:
+            get_stdout: bool = False, check: bool = False, ignore_cmds: bool = False,
+            **kwargs) -> subprocess.CompletedProcess:
         '''
         Run clang on `filename`.
 
@@ -288,7 +289,8 @@ class Clang:
                             have the return code in the returncode attribute, and output & stderr attributes if those
                             streams were captured (stderr is captured whenever the stderr argument is not provided and
                             the verbose attribute is `False`).
-        @param subprocess_kwargs Additional args for subprocess, `text`, `shell` and `executable` are ignored.
+        @param ignore_cmds  If `True`, the compiler ignores the compile commands.
+        @param kwargs       Additional args for subprocess, `text`, `shell` and `executable` are ignored.
 
         @returns CompletedProcess   The returned instance will have attributes args, returncode, stdout and stderr.
                                     When stdout and stderr are not captured, and those attributes will be None.
@@ -300,25 +302,28 @@ class Clang:
         if extra_args is None:
             extra_args = []
         if not isinstance(extra_args, list):
-            extra_args = list(extra_args)
+            extra_args = list(extra_args or [])
 
         if clang_args is None:
             clang_args = []
         clang_args = list(chain(*((Clang.__FLAG_PREFIX, flag) for flag in clang_args)))
 
-        run_dir, args = self.__compile_commands.get_args(filename)
+        if ignore_cmds:
+            run_dir, args = os.getcwd(), []
+        else:
+            run_dir, args = self.__compile_commands.get_args(filename)
 
-        error_stream = subprocess_kwargs.pop('stderr', None if self.verbose else subprocess.PIPE)
-        output_stream = subprocess_kwargs.pop('stdout', subprocess.PIPE if get_stdout else None)
+        error_stream = kwargs.pop('stderr', None if self.verbose else subprocess.PIPE)
+        output_stream = kwargs.pop('stdout', subprocess.PIPE if get_stdout else None)
 
         # Ignore some keyword arguments:
-        subprocess_kwargs.pop('executable', None)
-        subprocess_kwargs.pop('shell', None)
-        subprocess_kwargs.pop('text', None)
+        kwargs.pop('executable', None)
+        kwargs.pop('shell', None)
+        kwargs.pop('text', None)
 
         with directory(run_dir):
             proc = subprocess.run([self.exec_path, '-x', 'c++'] + clang_args + args + extra_args + [os.path.relpath(filename)],
-                                  stderr=error_stream, stdout=output_stream, text=True, check=False, **subprocess_kwargs)
+                                  stderr=error_stream, stdout=output_stream, text=True, check=False, **kwargs)
 
         if check and proc.returncode != 0:
             if self.verbose:
@@ -328,41 +333,69 @@ class Clang:
 
         return proc
 
-    def check_syntax(self, filename: AnyStr, extra_args: Iterable[Text] = None, **subprocess_kwargs) -> bool:
+    def check_syntax(self, filename: AnyStr, extra_args: Iterable[Text] = None, **kwargs) -> bool:
         '''
         Check for syntax errors in `filename` using clang's -fsyntax-only.
 
         @param filename     The name of the file. Use Clang.STDIN_FILENAME when using a non-file stdin.
         @param extra_args   Additional args to append to the compile commands' flags.
-        @param subprocess_kwargs Additional args for subprocess, `stderr`, `shell` and `executable` are ignored.
+        @param kwargs       Additional args for subprocess, `stderr`, `shell` and `executable` are ignored.
 
         @returns bool
         '''
-        return self.run(filename, extra_args=[Clang.__SYNTAX_ONLY_FLAG] + list(extra_args), **subprocess_kwargs).returncode == 0
+        return self.run(filename, extra_args=[Clang.__SYNTAX_ONLY_FLAG] + list(extra_args or []), **kwargs).returncode == 0
 
-    def preprocess(self, filename: AnyStr, extra_args: Iterable[Text] = None, **subprocess_kwargs) -> str:
+    def preprocess(self, filename: AnyStr, extra_args: Iterable[Text] = None, trim: bool = True, **kwargs) -> Text:
         '''
         Preprocess `filename`.
 
         @param filename     The name of the file. Use Clang.STDIN_FILENAME when using a non-file stdin.
         @param extra_args   Additional args to append to the compile commands' flags.
-        @param subprocess_kwargs Additional args for subprocess, `stderr`, `shell` and `executable` are ignored.
+        @param trim         Whether to remove preprocessor markings and trim whitespaces.
+        @param kwargs       Additional args for subprocess, `stderr`, `shell` and `executable` are ignored.
 
         @returns str
         '''
-        output = self.run(filename, extra_args=['-E'] + list(extra_args),
-                          get_stdout=True, check=True, **subprocess_kwargs).stdout
+        output = self.run(filename, extra_args=['-E'] + list(extra_args or []),
+                          get_stdout=True, check=True, **kwargs).stdout
 
-        # Remove preprocessor markings
-        output = re.sub(r'^#.*$', '', output, flags=re.M)
+        if trim:
+            # Remove preprocessor markings
+            output = re.sub(r'^#.*$', '', output, flags=re.M)
 
-        # Trim whitespace
-        output = re.sub(r'\n\s*\n', '\n', output, flags=re.M | re.S)
+            # Trim whitespace
+            output = re.sub(r'\n\s*\n', '\n', output, flags=re.M | re.S)
 
         return output
 
+    def get_macros(self, filename: AnyStr, extra_args: Iterable[Text] = None, **kwargs) -> Dict[Text, Text]:
+        '''
+        Extract all macros from `filename`
+
+        @param filename     The name of the file. Use Clang.STDIN_FILENAME when using a non-file stdin.
+        @param extra_args   Additional args to append to the compile commands' flags.
+        @param kwargs       Additional args for subprocess, `stderr`, `shell` and `executable` are ignored.
+
+        @returns Dict[Text, Text]   The dictionary that maps between the macros' names and their definitions.
+        '''
+        pp_output = self.preprocess(filename, extra_args=['-dM'] + list(extra_args or []), trim=False, **kwargs)
+
+        if "ignore_cmds" in kwargs:
+            kwargs.pop("ignore_cmds")
+
+        macro_names = re.findall(r'^#define (?P<name>\w+)(?!\(.*\))(?: |$)', pp_output, flags=re.M)
+
+        # The preprocessor compressed packs of empty lines, so a magic prefix is used to prevent it
+        _MAGIC_PREFIX = ': '  # pylint: disable=invalid-name
+        # A pseudo file is generated to contain all defines and the macros whose expanded forms are needed
+        macro_dumper = pp_output + '\n'.join(f'{_MAGIC_PREFIX}{name}' for name in macro_names) + '\n'
+        macro_definitions = self.preprocess(Clang.STDIN_FILENAME, ['-Wno-macro-redefined'], trim=False,
+                                            input=macro_dumper, ignore_cmds=True, **kwargs).split('\n')[:-1]
+
+        return dict(zip(reversed(macro_names), (macro_def[len(_MAGIC_PREFIX):] for macro_def in reversed(macro_definitions))))
+
     def run_plugin(self, plugin_lib: AnyStr, plugin_name: AnyStr, filename: AnyStr, extra_args: Iterable[Text] = None, *,
-                   get_stdout: bool = True, check: bool = False, **subprocess_kwargs) -> subprocess.CompletedProcess:
+                   get_stdout: bool = True, check: bool = False, **kwargs) -> subprocess.CompletedProcess:
         '''
         Run clang with the specified plugin on `filename`.
 
@@ -375,7 +408,7 @@ class Clang:
                             have the return code in the returncode attribute, and output & stderr attributes if those
                             streams were captured (stderr is captured whenever the stderr argument is not provided and
                             the verbose attribute is `False`).
-        @param subprocess_kwargs Additional args for subprocess, `stderr`, `shell` and `executable` are ignored.
+        @param kwargs Additional args for subprocess, `stderr`, `shell` and `executable` are ignored.
 
         @returns CompletedProcess   The returned instance will have attributes args, returncode, stdout and stderr.
                                     When stdout and stderr are not captured, and those attributes will be None.
@@ -383,11 +416,11 @@ class Clang:
         plugin_lib = os.path.abspath(plugin_lib)
 
         return self.run(filename,
-                        extra_args=[Clang.__SYNTAX_ONLY_FLAG] + list(extra_args),
+                        extra_args=[Clang.__SYNTAX_ONLY_FLAG] + list(extra_args or []),
                         clang_args=[Clang.__LOAD_LIB_FLAG, plugin_lib, Clang.__RUN_PLUGIN_FLAG, plugin_name],
                         get_stdout=get_stdout,
                         check=check,
-                        **subprocess_kwargs)
+                        **kwargs)
 
     def register_plugin(self, plugin_lib: AnyStr, plugin_name: AnyStr):
         '''
@@ -399,7 +432,7 @@ class Clang:
         self.__plugins[plugin_name] = plugin_lib
 
     def run_plugins(self, filename: AnyStr, extra_args: Iterable[Text] = None, *,
-                    get_stdout: bool = True, check: bool = False, **subprocess_kwargs) -> subprocess.CompletedProcess:
+                    get_stdout: bool = True, check: bool = False, **kwargs) -> subprocess.CompletedProcess:
         '''
         Run clang with the registered plugins on `filename`.
 
@@ -410,7 +443,7 @@ class Clang:
                             have the return code in the returncode attribute, and output & stderr attributes if those
                             streams were captured (stderr is captured whenever the stderr argument is not provided and
                             the verbose attribute is `False`).
-        @param subprocess_kwargs Additional args for subprocess, `stderr`, `shell` and `executable` are ignored.
+        @param kwargs Additional args for subprocess, `stderr`, `shell` and `executable` are ignored.
 
         @returns CompletedProcess   The returned instance will have attributes args, returncode, stdout and stderr.
                                     When stdout and stderr are not captured, and those attributes will be None.
@@ -423,8 +456,8 @@ class Clang:
         plugin_names = list(chain(*((Clang.__ADD_PLUGIN_FLAG, plugin) for plugin in self.__plugins)))
 
         return self.run(filename,
-                        extra_args=[Clang.__SYNTAX_ONLY_FLAG] + list(extra_args),
+                        extra_args=[Clang.__SYNTAX_ONLY_FLAG] + list(extra_args or []),
                         clang_args=plugin_libs + plugin_names,
                         get_stdout=get_stdout,
                         check=check,
-                        **subprocess_kwargs)
+                        **kwargs)
