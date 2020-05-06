@@ -6,16 +6,20 @@ into Python code.
 '''
 import os
 
-from typing import AnyStr as _Path, IO as _IO, Iterable as _Iterable, Text as _Text, Optional as _Optional
+from typing import AnyStr as _Path, IO as _IO, Iterable as _Iterable, Text as _Text
 
 from . import compiler, cpp, parser, parsers, utils
 
 
 def _load_file(filename: _Path, /, extra_args: _Iterable[_Text] = None, *, verbose: bool = False,
-               initial_scope: cpp.Scope = None, **run_plugin_kwargs) -> cpp.Scope:
+               initial_scope: cpp.Scope = None, exec_path: _Path = None,
+               commands_parser: compiler.CommandsParser = None, **run_plugin_kwargs) -> cpp.Scope:
     assert os.path.isfile(filename) or filename == compiler.Clang.STDIN_FILENAME
 
-    clang = compiler.Clang(verbose=verbose)
+    if exec_path:
+        clang = compiler.Clang(exec_path, commands_parser=commands_parser, verbose=verbose)
+    else:
+        clang = compiler.Clang(commands_parser=commands_parser, verbose=verbose)
 
     plugins_lib = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'plugins', 'ConstantsDumper.so')
     clang.register_plugin(plugins_lib, 'TypesDumper')
@@ -32,7 +36,8 @@ def _load_file(filename: _Path, /, extra_args: _Iterable[_Text] = None, *, verbo
 
 
 def load_path(path: _Path, /, extra_args: _Iterable[_Text] = None, *, verbose: bool = False,
-              initial_scope: _Optional[cpp.Scope] = None, **run_plugin_kwargs) -> cpp.Scope:
+              initial_scope: cpp.Scope = None, clang_path: _Path = None,
+              commands_parser: compiler.CommandsParser = None, **run_plugin_kwargs) -> cpp.Scope:
     '''
     Load all constants from ``path`` (a ``str`` or ``bytes`` instance containing a
     path to a file or a directory containing C++ code) to a Python object.
@@ -43,6 +48,8 @@ def load_path(path: _Path, /, extra_args: _Iterable[_Text] = None, *, verbose: b
     @param extra_args   Additional compilation arguments on top of the compile commands.
     @param verbose      If ``True`` is provided, don't suppress compiler errors.
     @param initial_scope The initial scope to use, defaults to a new empty scope.
+    @param clang_path   The full path of the clang executable.
+    @param commands_parser The CommandsParser object the compiler should use.
     @param run_plugin_kwargs Additional args for run_plugin().
 
     @returns Scope
@@ -59,9 +66,9 @@ def load_path(path: _Path, /, extra_args: _Iterable[_Text] = None, *, verbose: b
         for filename in source_files:
             filename = os.path.join(path, filename)
 
-            _load_file(filename, extra_args=extra_args,
-                       verbose=verbose,
-                       initial_scope=initial_scope,
+            _load_file(filename, extra_args=extra_args, verbose=verbose,
+                       initial_scope=initial_scope, exec_path=clang_path,
+                       commands_parser=commands_parser,
                        **run_plugin_kwargs)
 
         return initial_scope
@@ -70,7 +77,8 @@ def load_path(path: _Path, /, extra_args: _Iterable[_Text] = None, *, verbose: b
 
 
 def loads(code: _Text, /, extra_args: _Iterable[_Text] = None, *, verbose: bool = False,
-          initial_scope: _Optional[cpp.Scope] = None, **run_plugin_kwargs) -> cpp.Scope:
+          initial_scope: cpp.Scope = None, clang_path: _Path = None,
+          commands_parser: compiler.CommandsParser = None, **run_plugin_kwargs) -> cpp.Scope:
     '''
     Load all constants from ``code`` (a ``str`` instance containing C++ code) to a
     Python object.
@@ -79,16 +87,20 @@ def loads(code: _Text, /, extra_args: _Iterable[_Text] = None, *, verbose: bool 
     @param extra_args   Additional compilation arguments on top of the compile commands.
     @param verbose      If ``True`` is provided, don't suppress compiler errors.
     @param initial_scope The initial scope to use, defaults to a new empty scope.
+    @param clang_path   The full path of the clang executable.
+    @param commands_parser The CommandsParser object the compiler should use.
     @param run_plugin_kwargs Additional args for run_plugin().
 
     @returns Scope
     '''
     return _load_file(compiler.Clang.STDIN_FILENAME, extra_args=extra_args, verbose=verbose,
-                      initial_scope=initial_scope, input=code, **run_plugin_kwargs)
+                      initial_scope=initial_scope, exec_path=clang_path,
+                      commands_parser=commands_parser, input=code, **run_plugin_kwargs)
 
 
 def load(source_file: _IO, /, extra_args: _Iterable[_Text] = None, *, verbose: bool = False,
-         initial_scope: _Optional[cpp.Scope] = None, **run_plugin_kwargs) -> cpp.Scope:
+         initial_scope: cpp.Scope = None, clang_path: _Path = None,
+         commands_parser: compiler.CommandsParser = None, **run_plugin_kwargs) -> cpp.Scope:
     '''
     Load all constants from ``source_file`` (a ``.read()``-supporting file-like object
     containing C++ code) to a Python object.
@@ -97,8 +109,11 @@ def load(source_file: _IO, /, extra_args: _Iterable[_Text] = None, *, verbose: b
     @param extra_args   Additional compilation arguments on top of the compile commands.
     @param verbose      If ``True`` is provided, don't suppress compiler errors.
     @param initial_scope The initial scope to use, defaults to a new empty scope.
+    @param clang_path   The full path of the clang executable.
+    @param commands_parser The CommandsParser object the compiler should use.
     @param run_plugin_kwargs Additional args for run_plugin().
 
     @returns Scope
     '''
-    return loads(source_file.read(), extra_args=extra_args, verbose=verbose, initial_scope=initial_scope, **run_plugin_kwargs)
+    return loads(source_file.read(), extra_args=extra_args, verbose=verbose, initial_scope=initial_scope,
+                 clang_path=clang_path, commands_parser=commands_parser, **run_plugin_kwargs)

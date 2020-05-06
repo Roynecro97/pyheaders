@@ -7,7 +7,7 @@ import sys
 import argparse
 
 from . import load_path
-from .compiler import PluginError
+from .compiler import PluginError, CommandsParser
 from .cpp import Scope
 from .utils import enums, pretty_print, tree
 
@@ -50,6 +50,12 @@ def handle_get(args, global_scope):
     return found
 
 
+def compile_commands(path):
+    '''
+    Creates a CommandsParser, used as an argparse argument type
+    '''
+    CommandsParser(commands_path=path)
+
 class AppendWithName(argparse.Action):
     '''
     Action that appends the given flag values to a list in a tuple with the flag name.
@@ -74,6 +80,9 @@ def main():
     base_parser = argparse.ArgumentParser(add_help=False)
     base_parser.add_argument('files', metavar='file', nargs='+',
                              help="The files and directories that the constants are loaded from")
+    base_parser.add_argument('--clang-path', help="The full path to the clang executable")
+    base_parser.add_argument('--compile-commands', type=compile_commands, dest='commands_parser',
+                             help="The path to the compile commands")
 
     verbosity_flags = base_parser.add_mutually_exclusive_group()
     verbosity_flags.add_argument('--verbose', action='store_true', dest='verbose', help="Show every plugin error")
@@ -103,7 +112,8 @@ def main():
     try:
         global_scope = Scope()
         for filename in args.files:
-            load_path(filename, extra_args, initial_scope=global_scope, verbose=args.verbose)
+            load_path(filename, extra_args, initial_scope=global_scope, clang_path=args.clang_path,
+                      commands_parser=args.commands_parser, verbose=args.verbose)
     except PluginError:
         sys.exit(1)
     success = args.cmd(args, global_scope)
