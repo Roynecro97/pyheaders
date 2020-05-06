@@ -3,8 +3,9 @@ A C++ header (and source) parser.
 '''
 import glob
 import os
-import setuptools
 import sys
+
+import setuptools
 
 README_PATH = 'README.md'
 PLUGINS = 'pyheaders/plugins/*.so'
