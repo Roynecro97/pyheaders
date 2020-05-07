@@ -6,9 +6,8 @@ The main entry for the pyheaders package to allow it to run as a command-line to
 import sys
 import argparse
 
-from . import load_path
+from . import load_path, SrcData
 from .compiler import PluginError, CommandsParser
-from .cpp import Scope
 from .utils import enums, pretty_print, tree
 
 try:
@@ -17,35 +16,43 @@ except ImportError:
     pass
 
 
-def handle_print(args, global_scope):
+def handle_print(args, data):
     '''
     Handle the `print` subparser.
     '''
     if args.tree:
-        tree(global_scope)
+        tree(data.scope)
     elif args.enums:
-        print('\n'.join(f'{name}\t[{", ".join(val)}]' for name, val in enums(global_scope)))
+        print('\n'.join(f'{name}\t[{", ".join(val)}]' for name, val in enums(data.scope)))
+    elif args.macros:
+        print('\n'.join(f'{name}={value}' for name, value in sorted(data.macros.items()) if not name.startswith('_')))
     else:
-        pretty_print(global_scope)
+        pretty_print(data.scope)
 
     return True
 
+def _var_in_data(var_type, var_name, data):
+    if var_type == "macro":
+        return var_name in data.macros
+    return var_name in data.scope
 
-def handle_get(args, global_scope):
+def handle_get(args, data):
     '''
     Handle the `get` subparser.
     '''
     found = False
     for var_type, var_name in args.items:
-        if var_name in global_scope:
+        if _var_in_data(var_type, var_name, data):
             found = True
             if args.show_names:
                 print(f'{var_name}=', end="")
 
             if var_type == "const":
-                print(f'{global_scope[var_name]!r}')
+                print(f'{data.scope[var_name]!r}')
             elif var_type == "enum":
-                print(f'[{", ".join(global_scope[var_name])}]')
+                print(f'[{", ".join(data.scope[var_name])}]')
+            elif var_type == "macro":
+                print(f'{data.macros[var_name]}')
 
     return found
 
@@ -81,8 +88,11 @@ def main():
     base_parser.add_argument('files', metavar='file', nargs='+',
                              help="The files and directories that the constants are loaded from")
     base_parser.add_argument('--clang-path', help="The full path to the clang executable")
-    base_parser.add_argument('--compile-commands', type=compile_commands, dest='commands_parser',
-                             help="The path to the compile commands")
+
+    compile_commands_flags = base_parser.add_mutually_exclusive_group()
+    compile_commands_flags.add_argument('--compile-commands', type=compile_commands, dest='commands_parser',
+                                        help="The path to the compile commands")
+    compile_commands_flags.add_argument('--ignore-cmds', action='store_true', help="Ignore the compile commands")
 
     verbosity_flags = base_parser.add_mutually_exclusive_group()
     verbosity_flags.add_argument('--verbose', action='store_true', dest='verbose', help="Show every plugin error")
@@ -94,6 +104,7 @@ def main():
     print_mode = print_parser.add_mutually_exclusive_group()
     print_mode.add_argument('--tree', action='store_true', help="Print the constants in a tree-like format")
     print_mode.add_argument('--enums', action='store_true', help="Print the enums in enum formats")
+    print_mode.add_argument('--macros', action='store_true', help="Print the macros after being expanded")
     print_parser.set_defaults(cmd=handle_print)
 
     get_parser = subparsers.add_parser('get', parents=[base_parser], help="Get the values for given items")
@@ -101,6 +112,8 @@ def main():
                             help="The requested items")
     get_parser.add_argument('--enum', action=AppendWithName, dest='items',
                             help="The requested enums")
+    get_parser.add_argument('--macro', action=AppendWithName, dest='items',
+                            help="The requested macros")
     get_parser.add_argument('--hide-names', action='store_false', dest='show_names',
                             help="Hide the names of the requested items")
     get_parser.set_defaults(cmd=handle_get)
@@ -110,13 +123,13 @@ def main():
 
     args, extra_args = parser.parse_known_args()
     try:
-        global_scope = Scope()
+        data = SrcData()
         for filename in args.files:
-            load_path(filename, extra_args, initial_scope=global_scope, clang_path=args.clang_path,
-                      commands_parser=args.commands_parser, verbose=args.verbose)
+            data.update(load_path(filename, extra_args, initial_scope=data.scope, clang_path=args.clang_path,
+                                  commands_parser=args.commands_parser, verbose=args.verbose, ignore_cmds=args.ignore_cmds))
     except PluginError:
         sys.exit(1)
-    success = args.cmd(args, global_scope)
+    success = args.cmd(args, data)
     sys.exit(0 if success else 1)
 
 
