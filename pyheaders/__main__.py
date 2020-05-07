@@ -63,6 +63,7 @@ def compile_commands(path):
     '''
     CommandsParser(commands_path=path)
 
+
 class AppendWithName(argparse.Action):
     '''
     Action that appends the given flag values to a list in a tuple with the flag name.
@@ -70,6 +71,7 @@ class AppendWithName(argparse.Action):
     f.e. when using `program --flag1 val1 --flag2 val2 --flag1 val3`,
     The result list will contain: [("flag1", val1), ("flag2", val2), "flag1", val3]
     '''
+
     def __call__(self, parser, namespace, values, option_string=None):
         items = getattr(namespace, self.dest, None)
         items = [] if items is None else items[:]

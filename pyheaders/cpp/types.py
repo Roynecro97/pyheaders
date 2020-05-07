@@ -214,7 +214,7 @@ def parse_value(raw_value: Text, /, scope: Optional[AnyScope] = None) -> Any:
         return int(last_match.group())
 
     # Any floating-point
-    if match(r'^-?\d+\.\d+e-?\d+$'):
+    if match(r'^-?\d+\.\d+e[+-]?\d+$'):
         return float(last_match.group())
 
     # char or string
