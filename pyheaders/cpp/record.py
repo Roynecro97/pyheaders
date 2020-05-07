@@ -14,6 +14,19 @@ class Record(Scope):
     '''
     Represents a C++ class or struct.
     '''
+    _COLLAPSE_SHORT_RECORDS = True
+
+    @staticmethod
+    def collapse_short_records(collapse: bool = True):
+        '''
+        Control whether records with a single field should be collapsed.
+        '''
+        Record._COLLAPSE_SHORT_RECORDS = bool(collapse)
+
+    @staticmethod
+    def _identity(obj):
+        return obj
+
     @staticmethod
     def _safe_field_names(field_names: Union[Text, Iterable[Text]]) -> List[Text]:
         '''
@@ -45,10 +58,13 @@ class Record(Scope):
         self.__name = normalize(name)
         self.__fields = tuple(Record._safe_field_names(field_names))
 
-        module, name = split(remove_template(self.__name))
-        if not module:
-            module = ''
-        self.__type = namedtuple(name, self.__fields, module=module.replace(Scope.SEP, '.'))
+        if len(self.__fields) == 1 and Record._COLLAPSE_SHORT_RECORDS:
+            self.__type = Record._identity
+        else:
+            module, name = split(remove_template(self.__name))
+            if not module:
+                module = ''
+            self.__type = namedtuple(name, self.__fields, module=module.replace(Scope.SEP, '.'))
 
     @property
     def name(self):
