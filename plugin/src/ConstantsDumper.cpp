@@ -761,13 +761,15 @@ public:
                 ExprValueKind::VK_RValue),
             ast_dealloc);
 
-        alignas(CallExpr) char buffer[sizeof(CallExpr) + sizeof(Stmt *)];
-        CallExpr *func_call = CallExpr::CreateTemporary(
-            buffer,
-            cast_expr.get(),
-            result_type,
-            ExprValueKind::VK_RValue,
-            decl->getLocation());
+        unique_ptr<CallExpr, decltype(ast_dealloc)> func_call(
+            CallExpr::Create(
+                *context,
+                cast_expr.get(),
+                {}, // Empty llvm::ArrayRef<Expr*>
+                result_type,
+                ExprValueKind::VK_RValue,
+                decl->getLocation()),
+            ast_dealloc);
 
         Expr::EvalResult result;
         if (!func_call->EvaluateAsConstantExpr(result, Expr::ConstExprUsage::EvaluateForCodeGen, *context))
