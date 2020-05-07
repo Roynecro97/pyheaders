@@ -173,7 +173,10 @@ def unknown_type(*fields):
     '''
     Fallback for unrecognized type names.
     Returns a tuple of the arguments.
+    For single field types, return the field itself.
     '''
+    if len(fields) == 1:
+        return fields[0]
     return fields
 
 
@@ -222,6 +225,10 @@ def parse_value(raw_value: Text, /, scope: Optional[AnyScope] = None) -> Any:
         # Reevaluate escaped characters
         return eval(last_match.group())  # pylint: disable=eval-used
 
+    # bool
+    if match(r'^(true|false)$', flags=re.I):
+        return last_match.group().lower() == 'true'
+
     # Arrays
     if match(r'^\((?P<elements>.*)\)$'):
         if has_valid_brackets(elements := last_match.group('elements')):
@@ -241,7 +248,10 @@ def parse_value(raw_value: Text, /, scope: Optional[AnyScope] = None) -> Any:
         if type_func is None:
             type_func = get_type(remove_template(typename), default=unknown_type)
 
-        return type_func(*params)
+        try:
+            return type_func(*params)
+        except ValueError:
+            return unknown_type(params)
 
     # Give up and use the raw value
     return raw_value
