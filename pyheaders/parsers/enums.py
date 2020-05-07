@@ -51,9 +51,9 @@ class EnumsParser(ParserBase):
             enum_scope, enum_name = split_scope(name)
 
             if EnumsParser.__is_anonymous_name(enum_name):
-                anonymous_num = self.__anonymous_in_scope.get(enum_scope, 0) + 1
+                anonymous_num = self.__anonymous_in_scope.get(enum_scope, 0)
                 name += f'`{anonymous_num}'
-                self.__anonymous_in_scope[enum_scope] = anonymous_num
+                self.__anonymous_in_scope[enum_scope] = anonymous_num + 1
 
             self.__current_enum = Enum(enum_name)
             context.global_scope[name] = self.__current_enum

@@ -58,14 +58,14 @@ inline constexpr auto char_delim = '\'';
 inline constexpr auto string_delim = '"';
 inline constexpr auto escape_char = '\\';
 
-static inline bool hasAnyFields(const CXXRecordDecl *decl);
+static inline bool HasAnyFields(const CXXRecordDecl *decl);
 
-static inline bool baseHasAnyFields(const CXXBaseSpecifier &base)
+static inline bool BaseHasAnyFields(const CXXBaseSpecifier &base)
 {
-    return hasAnyFields(base.getType()->getAsCXXRecordDecl());
+    return HasAnyFields(base.getType()->getAsCXXRecordDecl());
 }
 
-static inline bool hasAnyFields(const CXXRecordDecl *decl)
+static inline bool HasAnyFields(const CXXRecordDecl *decl)
 {
     if (decl == nullptr)
     {
@@ -76,7 +76,7 @@ static inline bool hasAnyFields(const CXXRecordDecl *decl)
     {
         return true;
     }
-    return any_of(decl->bases_begin(), decl->bases_end(), baseHasAnyFields);
+    return any_of(decl->bases_begin(), decl->bases_end(), BaseHasAnyFields);
 }
 
 ostream &operator<<(ostream &os, const ValueInfo &value_info);
@@ -122,7 +122,7 @@ ostream &operator<<(ostream &os, const StructInfo &struct_info)
         {
             const auto &base_type = base_iter->getType();
 
-            const auto last_base_with_fields = i == base_count - 1 || none_of(next(base_iter), base_end, baseHasAnyFields);
+            const auto last_base_with_fields = i == base_count - 1 || none_of(next(base_iter), base_end, BaseHasAnyFields);
 
             os << StructInfo(base, base_type, ast_context,
                              last_base_with_fields && field_count == 0 && last);
@@ -193,7 +193,8 @@ ostream &operator<<(ostream &os, const ValueInfo &value_info)
     }
     else
     {
-        if (type->isPointerType() && type->getPointeeOrArrayElementType()->isAnyCharacterType())
+        if ((type->isPointerType() || (type->isArrayType() && !value.isArray())) &&
+            type->getPointeeOrArrayElementType()->isAnyCharacterType())
         {
             const auto str = value.getAsString(ast_context, type);
             // content includes the delimiters
@@ -203,15 +204,19 @@ ostream &operator<<(ostream &os, const ValueInfo &value_info)
         }
         if (type->isArrayType())
         {
-            const auto array_size = [](const APValue &value, const QualType &type) {
+            const auto element_type = QualType(type->getPointeeOrArrayElementType(), Qualifiers::Const);
+
+            const auto array_size = [&element_type](const APValue &value, const QualType &type) {
                 const auto real_size = value.getArraySize();
-                if (type->getPointeeOrArrayElementType()->isAnyCharacterType() && value.getArrayInitializedElt(real_size - 1).getInt() == 0)
+                if (element_type->isAnyCharacterType() &&
+                    (!element_type->isCharType() || element_type.getCanonicalType().getAsString() == element_type.getAsString()) &&
+                    value.getArrayInitializedElts() > 0 &&
+                    value.getArrayInitializedElt(real_size - 1).getInt() == 0)
                 {
                     return real_size - 1;
                 }
                 return real_size;
             }(value, type); // structured binding cannot be captured
-            const auto element_type = QualType(type->getPointeeOrArrayElementType(), Qualifiers::Const);
 
             // Handle char, signed char, unsigned char (regular strings)
             if (type->getPointeeOrArrayElementType()->isCharType())
@@ -265,7 +270,7 @@ ostream &operator<<(ostream &os, const RecordInfo &record_info)
     for (auto base_iter = decl->bases_begin(); base_iter != base_end; ++base_iter)
     {
         auto next_base = next(base_iter);
-        const auto last_base_with_fields = next_base == base_end || none_of(next_base, base_end, baseHasAnyFields);
+        const auto last_base_with_fields = next_base == base_end || none_of(next_base, base_end, BaseHasAnyFields);
 
         os << RecordInfo(base_iter->getType()->getAsCXXRecordDecl(),
                          last_base_with_fields && empty && last);
@@ -281,6 +286,79 @@ ostream &operator<<(ostream &os, const RecordInfo &record_info)
         }
     }
     return os;
+}
+
+/**
+ * @brief Get the first parent node of type `Parent` for `node` in the AST that matches
+ *        the given predicate.
+ *
+ * @tparam Parent   The type of the parent node.
+ * @param context   The AST context.
+ * @param node      The starting node.
+ * @param pred      A boolean predicate than accepts a `const Parent&`.
+ *
+ * @return const Parent*    Returns the first matching parent or `nullptr` if no such parent exists.
+ */
+template <typename Parent, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
+const Parent *GetParent(ASTContext &context, const ast_type_traits::DynTypedNode &node, const Predicate &pred)
+{
+    auto &&parents = context.getParents(node);
+    for (auto &&dynamic_parent : parents)
+    {
+        if (const Parent *parent = dynamic_parent.get<Parent>();
+            parent != nullptr && pred(*parent))
+        {
+            return parent;
+        }
+        if (const Parent *matching_ancestor = GetParent<Parent>(context, dynamic_parent, pred);
+            matching_ancestor != nullptr)
+        {
+            return matching_ancestor;
+        }
+    }
+    return nullptr;
+}
+
+template <typename Parent>
+const Parent *GetParent(ASTContext &context, const ast_type_traits::DynTypedNode &node)
+{
+    return GetParent<Parent>(context, node, [](const Parent &) { return true; });
+}
+
+template <typename Parent, typename Node, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
+const Parent *GetParent(ASTContext &context, const Node &node, const Predicate &pred)
+{
+    return GetParent<Parent>(context, ast_type_traits::DynTypedNode::create(node), pred);
+}
+
+template <typename Parent, typename Node>
+const Parent *GetParent(ASTContext &context, const Node &node)
+{
+    return GetParent<Parent>(context, ast_type_traits::DynTypedNode::create(node));
+}
+
+template <typename Parent, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
+bool HasParent(ASTContext &context, const ast_type_traits::DynTypedNode &node, const Predicate &pred)
+{
+    return GetParent<Parent>(context, node, pred) != nullptr;
+}
+
+template <typename Parent>
+bool HasParent(ASTContext &context, const ast_type_traits::DynTypedNode &node)
+{
+    return GetParent<Parent>(context, node) != nullptr;
+}
+
+template <typename Parent, typename Node, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
+bool HasParent(ASTContext &context, const Node &node, const Predicate &pred)
+{
+    return GetParent<Parent>(context, node, pred) != nullptr;
+}
+
+template <typename Parent, typename Node>
+bool HasParent(ASTContext &context, const Node &node)
+{
+    return GetParent<Parent>(context, node) != nullptr;
 }
 
 class ConstantsDumperVisitor : public RecursiveASTVisitor<ConstantsDumperVisitor>
@@ -299,7 +377,7 @@ public:
         for (auto &&enum_constant_decl : decl->enumerators())
         {
             cout << enum_constant_decl->getQualifiedNameAsString() << "="
-                 << ValueInfo(APValue(enum_constant_decl->getInitVal()), decl->getIntegerType(), decl->getASTContext())
+                 << ValueInfo(APValue(enum_constant_decl->getInitVal()), decl->getIntegerType(), *context)
                  << "," << endl;
         }
         cout << "}" << endl;
@@ -324,7 +402,7 @@ public:
         DBG(decl->getType().getAsString());                                         // const int32_t
         DBG(decl->getType()->isFundamentalType());
         DBG(decl->getType()->isRecordType());
-        DBG(decl->getType()->isLiteralType(decl->getASTContext()));
+        DBG(decl->getType()->isLiteralType(*context));
         DBG(decl->getType()->isArrayType());
         DBG(decl->getType()->isConstantArrayType());
         DBG(decl->getType()->isPointerType());
@@ -337,25 +415,28 @@ public:
 
         if (decl->getType()->isRecordType())
         {
-            auto *recordDecl = decl->getType()->getAsCXXRecordDecl();
-            DBG(recordDecl->isPOD());
-            DBG(recordDecl->isStandardLayout());
-            DBG(recordDecl->isCXX11StandardLayout());
-            DBG(recordDecl->isLiteral());
-            DBG(decl->getType()->getAsRecordDecl()->getBody());
-            DBG(decl->getType()->getAsRecordDecl()->getNameAsString());
+            auto *record_decl = decl->getType()->getAsCXXRecordDecl();
+            if (record_decl != nullptr && record_decl->hasDefinition())
+            {
+                DBG(record_decl->isPOD());
+                DBG(record_decl->isStandardLayout());
+                DBG(record_decl->isCXX11StandardLayout());
+                DBG(record_decl->isLiteral());
+                DBG(decl->getType()->getAsRecordDecl()->getBody());
+                DBG(decl->getType()->getAsRecordDecl()->getNameAsString());
 
-            DBG(recordDecl->getNameAsString());
-            DBG(recordDecl->getQualifiedNameAsString());
+                DBG(record_decl->getNameAsString());
+                DBG(record_decl->getQualifiedNameAsString());
+            }
         }
         if (decl->getEvaluatedValue())
         {
-            DBG(decl->getEvaluatedValue()->getAsString(decl->getASTContext(), decl->getType()));
+            DBG(decl->getEvaluatedValue()->getAsString(*context, decl->getType()));
         }
 #endif // DEBUG_PLUGIN
 
         // Check only literal types
-        if (!decl->getType()->isLiteralType(decl->getASTContext()))
+        if (!decl->getType()->isLiteralType(*context))
         {
             DBG_NOTE(Leave VisitVarDecl()[not literal]);
             DBG_NOTE(--------------------);
@@ -381,7 +462,7 @@ public:
             return true;
         }
 
-        if (decl->isConstexpr() || (decl->checkInitIsICE() && decl->isUsableInConstantExpressions(decl->getASTContext())))
+        if (decl->isConstexpr() || (decl->checkInitIsICE() && decl->isUsableInConstantExpressions(*context)))
         {
             if (decl->getEvaluatedValue() == nullptr)
             {
@@ -422,27 +503,185 @@ public:
                     {
                         DBG(base_field_index);
                         auto base_field = base.getStructField(base_field_index);
-                        DBG(base_field.getAsString(decl->getASTContext(), decl->getType()));
+                        DBG(base_field.getAsString(*context, decl->getType()));
                     }
-                    // DBG(base.getAsString(decl->getASTContext(), decl->getType()));
+                    // DBG(base.getAsString(*context, decl->getType()));
                 }
                 for (unsigned field_index = 0; field_index < decl->getEvaluatedValue()->getStructNumFields(); ++field_index)
                 {
                     DBG(field_index);
                     auto field = decl->getEvaluatedValue()->getStructField(field_index);
-                    DBG(field.getAsString(decl->getASTContext(), decl->getType()));
+                    DBG(field.getAsString(*context, decl->getType()));
                 }
             }
 #endif // DEBUG_PLUGIN
 
             cout << decl->getQualifiedNameAsString() << "="
-                 << ValueInfo(*decl->getEvaluatedValue(), decl->getType(), decl->getASTContext()) << endl;
+                 << ValueInfo(*decl->getEvaluatedValue(), decl->getType(), *context) << endl;
         }
 
         DBG_NOTE(Leave VisitVarDecl());
         DBG_NOTE(--------------------);
         return true;
     }
+
+#ifdef DEBUG_PLUGIN
+    void all_parents(const ast_type_traits::DynTypedNode &node, std::string depth = ""s)
+    {
+        DBG(depth);
+        auto &&parents = context.getParents(node);
+        DBG(parents.empty());
+        unsigned idx = 0;
+        for (auto &&parent : parents)
+        {
+            auto parent_id = depth + " " + to_string(idx);
+            DBG(parent_id);
+            DBG(parent.getNodeKind().asStringRef().str());
+            all_parents(parent, parent_id);
+            ++idx;
+        }
+    }
+
+    template <typename NodeT>
+    void all_parents(const NodeT &node)
+    {
+        DBG_NOTE(~~~~~~~~~~~~~~~~~~~~~~);
+        DBG_NOTE(Traversing all parents);
+        all_parents(ast_type_traits::DynTypedNode::create(node));
+        DBG_NOTE(~~~~~~~~~~~~~~~~~~~~~~);
+    }
+#endif // DEBUG_PLUGIN
+
+    bool VisitStringLiteral(StringLiteral *literal)
+    {
+        DBG_NOTE(--------------------------);
+        DBG_NOTE(Enter VisitStringLiteral());
+
+        DBG(literal->getString().str());
+        DBG(literal->getType().getAsString());
+        DBG(QualType(literal->getType()->getPointeeOrArrayElementType(), 0).getCanonicalType().getAsString());
+
+        DBG(literal->getBeginLoc().isValid());
+        DBG(literal->getBeginLoc().isFileID());
+        DBG(literal->getBeginLoc().isMacroID());
+
+        auto location = context->getFullLoc(literal->getBeginLoc());
+
+#ifdef DEBUG_PLUGIN
+        DBG(location.printToString(context->getSourceManager()));
+        DBG(location.isFileID());
+        DBG(location.isMacroID());
+        DBG(location.isMacroArgExpansion());
+        DBG(location.getLineNumber());
+        DBG(location.getExpansionLineNumber());
+        const FileEntry *file = location.getFileEntry();
+        if (file)
+        {
+            DBG(file->getName().str());
+            DBG(file->tryGetRealPathName().str());
+        }
+#endif // DEBUG_PLUGIN
+
+        DBG(location.isInSystemHeader());
+
+        // Exclude system headers
+        if (location.isInSystemHeader())
+        {
+            DBG_NOTE(Leave VisitStringLiteral()[system header]);
+            DBG_NOTE(--------------------------);
+
+            return true;
+        }
+
+        auto presumed_location = location.getPresumedLoc();
+        DBG(presumed_location.getFilename());
+        DBG(presumed_location.getLine());
+
+        DBG(literal->isAscii());
+
+        // Exclude __FILE__
+        if (literal->isAscii() && literal->getString() == presumed_location.getFilename())
+        {
+            DBG_NOTE(Leave VisitStringLiteral()[__FILE__]);
+            DBG_NOTE(--------------------------);
+
+            return true;
+        }
+
+#ifdef DEBUG_PLUGIN
+        all_parents(*literal);
+#endif // DEBUG_PLUGIN
+
+        // Only print magic literals, assignment to variable = not magic
+        const auto assigned_to_var = HasParent<VarDecl>(*context, *literal,
+                                                        [](const VarDecl &decl) { return !decl.isLocalVarDeclOrParm() || decl.isLocalVarDecl(); });
+        DBG(assigned_to_var);
+        if (assigned_to_var)
+        {
+#ifdef WARN_POSSIBLE_CONSTEXPR
+            auto var = GetParent<VarDecl>(*context, *literal, [](const VarDecl &decl) { return !decl.isLocalVarDeclOrParm() || decl.isLocalVarDecl(); });
+            if (!(var->isConstexpr() || (var->checkInitIsICE() && var->isUsableInConstantExpressions(*context))))
+            {
+                DiagnosticsEngine &diagEngine = context->getDiagnostics();
+                unsigned diagID = diagEngine.getCustomDiagID(DiagnosticsEngine::Warning, "Variable could be marked constexpr");
+                auto var_location = var->getLocation();
+                diagEngine.Report(var_location, diagID);
+            }
+#endif // WARN_POSSIBLE_CONSTEXPR
+
+            DBG_NOTE(Leave VisitStringLiteral()[not magic]);
+            DBG_NOTE(--------------------------);
+
+            return true;
+        }
+
+        // Generate a name: namespaces::func_name()::(literal) or namespaces::(literal) or ::(literal)
+        string name;
+        if (const auto *owning_func = GetParent<FunctionDecl>(*context, *literal))
+        {
+            DBG(owning_func->getNameAsString());
+            DBG(owning_func->getQualifiedNameAsString());
+
+            // Exclude __FUNCTION__ / __func__ etc
+            if (literal->isAscii() && literal->getString() == owning_func->getNameAsString())
+            {
+                DBG_NOTE(Leave VisitStringLiteral()[__FUNCTION__]);
+                DBG_NOTE(--------------------------);
+
+                return true;
+            }
+            name = owning_func->getQualifiedNameAsString() + "()";
+        }
+        else if (const auto *owning_namespace = GetParent<NamespaceDecl>(*context, *literal))
+        {
+            DBG(owning_namespace->getNameAsString());
+            DBG(owning_namespace->getQualifiedNameAsString());
+            name = owning_namespace->getQualifiedNameAsString();
+        }
+        name += "::(literal)";
+
+        Expr::EvalResult result;
+        if (!literal->EvaluateAsConstantExpr(result, Expr::ConstExprUsage::EvaluateForCodeGen, *context))
+        {
+            DBG_NOTE(Leave VisitStringLiteral()[failed to evaluate]);
+            DBG_NOTE(--------------------------);
+
+            return true;
+        }
+        DBG(result.Val.getAsString(*context, literal->getType()));
+        cout << "#literal " << name << "=" << ValueInfo(result.Val, literal->getType(), *context) << endl;
+
+        DBG_NOTE(Leave VisitStringLiteral());
+        DBG_NOTE(--------------------------);
+        return true;
+    }
+
+    void SetASTContext(ASTContext &new_context)
+    {
+        context = &new_context;
+    }
+
+    ASTContext *context;
 };
 
 class ConstantsDumperConsumer : public ASTConsumer
@@ -450,6 +689,7 @@ class ConstantsDumperConsumer : public ASTConsumer
 public:
     void HandleTranslationUnit(ASTContext &context)
     {
+        visitor.SetASTContext(context);
         visitor.TraverseDecl(context.getTranslationUnitDecl());
     }
 
@@ -520,7 +760,7 @@ public:
             return true;
         }
 
-        if (!hasAnyFields(decl))
+        if (!HasAnyFields(decl))
         {
             DBG_NOTE(Leave VisitCXXRecordDecl()[empty]);
             DBG_NOTE(--------------------------);

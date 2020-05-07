@@ -45,8 +45,9 @@ def _load_file(filename: _Path, /, extra_args: _Iterable[_Text] = None, *, verbo
 
     consts_parser = parser.Parser(
         parsers.RecordsParser(),
-        parsers.enums.EnumsParser(),
-        parsers.constants.ConstantsParser()
+        parsers.EnumsParser(),
+        parsers.ConstantsParser(),
+        parsers.LiteralsParser(),
     )
 
     return SrcData(consts_parser.parse(consts_txt, initial_scope=initial_scope, strict=True),
