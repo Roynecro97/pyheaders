@@ -51,9 +51,9 @@ class LiteralsParser(ParserBase):
 
             scope_name = split_scope(name)[0] or ''
 
-            num = self.__literals_in_scope.get(scope_name, 0) + 1
+            num = self.__literals_in_scope.get(scope_name, 0)
             name += f'`{num}'
-            self.__literals_in_scope[scope_name] = num
+            self.__literals_in_scope[scope_name] = num + 1
 
             context.global_scope[name] = value
 
