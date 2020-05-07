@@ -529,7 +529,7 @@ public:
     void all_parents(const ast_type_traits::DynTypedNode &node, std::string depth = ""s)
     {
         DBG(depth);
-        auto &&parents = context.getParents(node);
+        auto &&parents = context->getParents(node);
         DBG(parents.empty());
         unsigned idx = 0;
         for (auto &&parent : parents)
@@ -673,6 +673,116 @@ public:
 
         DBG_NOTE(Leave VisitStringLiteral());
         DBG_NOTE(--------------------------);
+        return true;
+    }
+
+    bool VisitFunctionDecl(FunctionDecl *decl)
+    {
+        DBG_NOTE(-------------------------);
+        DBG_NOTE(Enter VisitFunctionDecl());
+
+        DBG(decl->getNameAsString());
+        DBG(decl->getQualifiedNameAsString());
+        DBG(decl->getType().getAsString());                          // T (...)
+        DBG(context->getPointerType(decl->getType()).getAsString()); // T (*)(...)
+
+        // Skip partial definitions
+        if (!decl->hasBody())
+        {
+            DBG_NOTE(Leave VisitFunctionDecl()[no body]);
+            DBG_NOTE(-------------------------);
+
+            return true;
+        }
+
+        // Exclude template definitions
+        if (decl->isTemplated())
+        {
+            DBG_NOTE(Leave VisitFunctionDecl()[template]);
+            DBG_NOTE(-------------------------);
+
+            return true;
+        }
+
+        // Exclude non-constexpr functions
+        if (!decl->isConstexpr())
+        {
+            DBG_NOTE(Leave VisitFunctionDecl()[not constexpr]);
+            DBG_NOTE(-------------------------);
+
+            return true;
+        }
+
+        // Only calculate functions with no parameters
+        if (decl->getNumParams() != 0)
+        {
+            DBG_NOTE(Leave VisitFunctionDecl()[has params]);
+            DBG_NOTE(-------------------------);
+
+            return true;
+        }
+
+        // Exclude functions that return nothing
+        // (Although it's unlikely that a 0-parameter constexpr function that returns nothing will exist)
+        auto result_type = decl->getCallResultType();
+        if (result_type->isVoidType())
+        {
+            DBG_NOTE(Leave VisitFunctionDecl()[void]);
+            DBG_NOTE(-------------------------);
+
+            return true;
+        }
+
+        // Create a CallExpr for a call to the current function
+        auto ast_dealloc = [&](void *p) {
+            DBG(p);
+            context->Deallocate(p);
+        };
+        unique_ptr<DeclRefExpr, decltype(ast_dealloc)> decl_ref(
+            DeclRefExpr::Create(
+                *context,
+                decl->getQualifierLoc(),
+                decl->getLocation(),
+                decl,
+                false,
+                decl->getLocation(),
+                decl->getType(),
+                ExprValueKind::VK_LValue,
+                decl),
+            ast_dealloc);
+
+        unique_ptr<ImplicitCastExpr, decltype(ast_dealloc)> cast_expr(
+            ImplicitCastExpr::Create(
+                *context,
+                context->getPointerType(decl->getType()),
+                CastKind::CK_FunctionToPointerDecay,
+                decl_ref.get(),
+                nullptr, // const CXXCastPath * BasePath
+                ExprValueKind::VK_RValue),
+            ast_dealloc);
+
+        alignas(CallExpr) char buffer[sizeof(CallExpr) + sizeof(Stmt *)];
+        CallExpr *func_call = CallExpr::CreateTemporary(
+            buffer,
+            cast_expr.get(),
+            result_type,
+            ExprValueKind::VK_RValue,
+            decl->getLocation());
+
+        Expr::EvalResult result;
+        if (!func_call->EvaluateAsConstantExpr(result, Expr::ConstExprUsage::EvaluateForCodeGen, *context))
+        {
+            DBG_NOTE(Leave VisitFunctionDecl()[failed to evaluate]);
+            DBG_NOTE(-------------------------);
+
+            return true;
+        }
+        DBG(result.Val.getAsString(*context, result_type));
+
+        cout << decl->getQualifiedNameAsString() << "=" << ValueInfo(result.Val, result_type, *context) << endl;
+
+        DBG_NOTE(Leave VisitFunctionDecl());
+        DBG_NOTE(-------------------------);
         return true;
     }
 
