@@ -669,7 +669,7 @@ public:
             return true;
         }
         DBG(result.Val.getAsString(*context, literal->getType()));
-        cout << "literal " << name << "=" << ValueInfo(result.Val, literal->getType(), *context) << endl;
+        cout << "#literal " << name << "=" << ValueInfo(result.Val, literal->getType(), *context) << endl;
 
         DBG_NOTE(Leave VisitStringLiteral());
         DBG_NOTE(--------------------------);

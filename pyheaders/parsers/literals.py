@@ -16,7 +16,7 @@ class LiteralsParser(ParserBase):
     '''
     Parses the magic string literals outputted by the ConstantsDumper clang plugin.
     '''
-    LITERAL_MATCHER = re.compile(r'^\s*literal\s+(?P<constant>.*)$')
+    LITERAL_MATCHER = re.compile(r'^\s*#\s*literal\s+(?P<constant>.*)$')
     _LITERAL_UNQUALIFIED_NAME = '(literal)'
 
     def __init__(self, *args, **kwargs):
