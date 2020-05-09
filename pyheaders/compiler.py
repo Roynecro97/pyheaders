@@ -181,10 +181,11 @@ class CommandsParser:
 
         commands = self.__commands_getter(filename)
         for cmd in commands:
-            if cmd['file'] == filename:
+            cmd_file = os.path.abspath(os.path.join(cmd['directory'], cmd['file']))
+            if cmd_file == filename:
                 return cmd
 
-            if loose_match.search(cmd['file']):
+            if loose_match.search(cmd_file):
                 close_cmd = cmd
 
         return close_cmd
