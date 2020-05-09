@@ -89,6 +89,12 @@ class Scope(OrderedDict):
             return super().__contains__(name) and inner in self[name]
         return super().__contains__(name)
 
+    def isempty(self) -> bool:
+        '''
+        S.isempty() -> bool.  Check if there are any items in S that are not a Scope.
+        '''
+        return all(isinstance(item, Scope) and item.isempty() for item in self.values())
+
 
 def normalize(name: Text) -> Text:
     '''

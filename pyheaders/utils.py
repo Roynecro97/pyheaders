@@ -21,7 +21,7 @@ def _tree(scope: Scope, indent: Text):
             next_prefix = indent + _TREE_LINE
 
         if isinstance(scope[item], Scope):
-            if scope[item]:
+            if not scope[item].isempty():
                 print(prefix + item)
                 _tree(scope[item], next_prefix)
         elif isinstance(scope[item], Enum):
@@ -54,7 +54,7 @@ def pretty_print(scope: Scope, indent: Text = ''):
     '''
     for item in scope:
         if isinstance(scope[item], Scope):
-            if scope[item]:
+            if not scope[item].isempty():
                 print(indent + item, '{')
                 pretty_print(scope[item], indent + _PRETTY_PRINT_INDENT)
                 print(indent + '}')

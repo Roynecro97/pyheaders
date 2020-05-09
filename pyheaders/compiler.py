@@ -67,8 +67,7 @@ def directory(dirname: AnyStr):
         os.chdir(old_cwd)
 
 
-C_CPP_SOURCE_FILES_EXTENSIONS = [
-    # C++
+CPP_SOURCE_FILES_EXTENSIONS = (
     '.cpp',
     '.cc',
     '.cxx',
@@ -76,12 +75,17 @@ C_CPP_SOURCE_FILES_EXTENSIONS = [
     '.CPP',
     '.cp',
     '.c++',
-    '.ii',  # C++ code that will not be pre-processed
-    # C
+    '.ii'  # C++ code that will not be pre-processed
+)
+
+C_SOURCE_FILES_EXTENSIONS = (
     '.c',
     '.i'  # C code that will not be pre-processed
-    # Pre-compiled headers
+)
+
+HEADER_FILES_EXTENSIONS = (
     '.h',
+    # Only C++
     '.hpp',
     '.hh',
     '.hxx',
@@ -90,7 +94,9 @@ C_CPP_SOURCE_FILES_EXTENSIONS = [
     '.hp',
     '.h++',
     '.tcc'
-]
+)
+
+ALL_C_CPP_FILES_EXTENSIONS = CPP_SOURCE_FILES_EXTENSIONS + C_SOURCE_FILES_EXTENSIONS + HEADER_FILES_EXTENSIONS
 
 
 class CommandsParser:
@@ -103,13 +109,29 @@ class CommandsParser:
     EXCLUDE_FLAGS = {
         r'cc$': 1,
         r'-c$': 1,
+        r'-o.+': 1,
         r'-o$': 2,
+        # Debug symbols
         r'-g': 1,
-        r'-O.?$': 1
+        # Optimizations
+        r'-O.?$': 1,
+        # Linker flags
+        r'-(?:[st]|static|shared)$': 1,
+        r'-[Lle].+': 1,
+        r'-[zLle]$': 2,
+        r'-T(?:bss|data|text)?.+': 1,
+        r'-T(?:bss|data|text)?$': 2,
+        r'--(?:library-directory|for-linker)=': 1,
+        r'--(?:library-directory|for-linker)$': 2,
+        r'-Wl,': 1,
+        r'-X(?:linker)?$': 2,
+        r'-r(?:path)?$': 2,
+        r'--entry$': 1,
+        r'-fuse-ld=': 1,
     }
 
     # Used to find args for files that are not in the compile commands, like most headers
-    __C_CPP_SOURCE_FILES_EXTENSIONS = [re.escape(ext) for ext in C_CPP_SOURCE_FILES_EXTENSIONS]
+    __C_CPP_SOURCE_FILES_EXTENSIONS = [re.escape(ext) for ext in ALL_C_CPP_FILES_EXTENSIONS]
 
     def __init__(self, *, commands_path: AnyStr = None, exclude_flags: Dict[Text, int] = None):
         self.__commands_getter = None
@@ -181,10 +203,11 @@ class CommandsParser:
 
         commands = self.__commands_getter(filename)
         for cmd in commands:
-            if cmd['file'] == filename:
+            cmd_file = os.path.abspath(os.path.join(cmd['directory'], cmd['file']))
+            if cmd_file == filename:
                 return cmd
 
-            if loose_match.search(cmd['file']):
+            if loose_match.search(cmd_file):
                 close_cmd = cmd
 
         return close_cmd
@@ -202,8 +225,7 @@ class CommandsParser:
             else:
                 yield arg
 
-    @staticmethod
-    def __get_relevant_args(entry: CompileCommandsEntry) -> List[Text]:
+    def __get_relevant_args(self, entry: CompileCommandsEntry) -> List[Text]:
         '''
         Get a list of relevant compilation flags from `command` field in the compile command.
 
@@ -211,7 +233,7 @@ class CommandsParser:
         '''
         args = shlex.split(entry['command'])
 
-        for pattern, arg_count in CommandsParser.EXCLUDE_FLAGS.items():
+        for pattern, arg_count in self.exclude.items():
             args = CommandsParser.__filter_by_regex(pattern, arg_count, args)
 
         # Unpack generators
@@ -223,8 +245,7 @@ class CommandsParser:
 
         return args
 
-    @staticmethod
-    def __common_flags(commands: CompileCommands) -> List[Text]:
+    def __common_flags(self, commands: CompileCommands) -> List[Text]:
         '''
         Get all flags that are common among for all files.
 
@@ -232,7 +253,7 @@ class CommandsParser:
         '''
         flags = None
         for cmd in commands:
-            cmd_flags = set(CommandsParser.__get_relevant_args(cmd))
+            cmd_flags = set(self.__get_relevant_args(cmd))
             flags = flags & cmd_flags if flags is not None else cmd_flags
         return list(flags)
 
@@ -249,10 +270,10 @@ class CommandsParser:
             filename = os.path.abspath(filename)
 
             if cmd := self._find_in_commands(filename):
-                return cmd['directory'], CommandsParser.__get_relevant_args(cmd)
+                return cmd['directory'], self.__get_relevant_args(cmd)
 
         if compile_commands := self.__commands_getter(filename):
-            return compile_commands[0]['directory'], CommandsParser.__common_flags(compile_commands)
+            return compile_commands[0]['directory'], self.__common_flags(compile_commands)
 
         return os.getcwd(), []
 

@@ -20,6 +20,6 @@ class RecordsParser(ParserBase):
         if type_match := RecordsParser.RECORD_MATCHER.match(line):
             name = type_match.group('name')
             fields = type_match.group('fields')
-            context.global_scope[name] = Record(name, fields, context.global_scope.get(name, {}))
+            context.global_scope[name] = Record(name, fields, context.global_scope.get(name, []))
 
         return bool(type_match)
