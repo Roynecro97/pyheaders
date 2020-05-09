@@ -859,14 +859,6 @@ public:
             return true;
         }
 
-        if (!HasAnyFields(decl))
-        {
-            DBG_NOTE(Leave VisitCXXRecordDecl()[empty]);
-            DBG_NOTE(--------------------------);
-
-            return true;
-        }
-
 #ifdef DEBUG_PLUGIN
         if (decl->getDescribedTemplate())
         {
