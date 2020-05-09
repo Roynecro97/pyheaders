@@ -67,8 +67,7 @@ def directory(dirname: AnyStr):
         os.chdir(old_cwd)
 
 
-C_CPP_SOURCE_FILES_EXTENSIONS = [
-    # C++
+CPP_SOURCE_FILES_EXTENSIONS = (
     '.cpp',
     '.cc',
     '.cxx',
@@ -76,12 +75,17 @@ C_CPP_SOURCE_FILES_EXTENSIONS = [
     '.CPP',
     '.cp',
     '.c++',
-    '.ii',  # C++ code that will not be pre-processed
-    # C
+    '.ii'  # C++ code that will not be pre-processed
+)
+
+C_SOURCE_FILES_EXTENSIONS = (
     '.c',
     '.i'  # C code that will not be pre-processed
-    # Pre-compiled headers
+)
+
+HEADER_FILES_EXTENSIONS = (
     '.h',
+    # Only C++
     '.hpp',
     '.hh',
     '.hxx',
@@ -90,7 +94,9 @@ C_CPP_SOURCE_FILES_EXTENSIONS = [
     '.hp',
     '.h++',
     '.tcc'
-]
+)
+
+ALL_C_CPP_FILES_EXTENSIONS = CPP_SOURCE_FILES_EXTENSIONS + C_SOURCE_FILES_EXTENSIONS + HEADER_FILES_EXTENSIONS
 
 
 class CommandsParser:
@@ -109,7 +115,7 @@ class CommandsParser:
     }
 
     # Used to find args for files that are not in the compile commands, like most headers
-    __C_CPP_SOURCE_FILES_EXTENSIONS = [re.escape(ext) for ext in C_CPP_SOURCE_FILES_EXTENSIONS]
+    __C_CPP_SOURCE_FILES_EXTENSIONS = [re.escape(ext) for ext in ALL_C_CPP_FILES_EXTENSIONS]
 
     def __init__(self, *, commands_path: AnyStr = None, exclude_flags: Dict[Text, int] = None):
         self.__commands_getter = None

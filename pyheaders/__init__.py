@@ -11,6 +11,7 @@ from dataclasses import dataclass as _dataclass, field as _field
 
 from . import compiler, cpp, parser, parsers, utils
 
+
 @_dataclass
 class SrcData:
     '''
@@ -24,7 +25,7 @@ class SrcData:
         Updates its data with the data of another SrcData object.
         '''
         self.scope.update(other.scope)
-        self.macros.update(other.macros)
+        self.macros.update(other.macros)  # pylint: disable=no-member
 
 
 def _load_file(filename: _Path, /, extra_args: _Iterable[_Text] = None, *, verbose: bool = False,
@@ -82,7 +83,7 @@ def load_path(path: _Path, /, extra_args: _Iterable[_Text] = None, *, verbose: b
             returned_data.scope = initial_scope
 
         source_files = (os.path.join(dirpath, filename) for dirpath, _, files in os.walk(path) for filename in files
-                        if os.path.splitext(filename)[-1] in compiler.C_CPP_SOURCE_FILES_EXTENSIONS)
+                        if os.path.splitext(filename)[-1] in compiler.CPP_SOURCE_FILES_EXTENSIONS)
         for filename in source_files:
             filename = os.path.join(path, filename)
 
