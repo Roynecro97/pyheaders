@@ -95,7 +95,7 @@ ostream &operator<<(ostream &os, const CharInfo &char_info)
         return os;
     }
 
-    if (value == delim)
+    if (value == delim || value == escape_char)
     {
         os << escape_char;
     }
@@ -272,8 +272,11 @@ ostream &operator<<(ostream &os, const RecordInfo &record_info)
         auto next_base = next(base_iter);
         const auto last_base_with_fields = next_base == base_end || none_of(next_base, base_end, BaseHasAnyFields);
 
-        os << RecordInfo(base_iter->getType()->getAsCXXRecordDecl(),
-                         last_base_with_fields && empty && last);
+        if (base_iter->getType()->isRecordType())
+        {
+            os << RecordInfo(base_iter->getType()->getAsCXXRecordDecl(),
+                             last_base_with_fields && empty && last);
+        }
     }
 
     auto field_end = decl->field_end();
@@ -415,6 +418,9 @@ public:
 
         if (decl->getType()->isRecordType())
         {
+            DBG(decl->getType()->getAsRecordDecl()->getBody());
+            DBG(decl->getType()->getAsRecordDecl()->getNameAsString());
+
             auto *record_decl = decl->getType()->getAsCXXRecordDecl();
             if (record_decl != nullptr && record_decl->hasDefinition())
             {
@@ -422,8 +428,6 @@ public:
                 DBG(record_decl->isStandardLayout());
                 DBG(record_decl->isCXX11StandardLayout());
                 DBG(record_decl->isLiteral());
-                DBG(decl->getType()->getAsRecordDecl()->getBody());
-                DBG(decl->getType()->getAsRecordDecl()->getNameAsString());
 
                 DBG(record_decl->getNameAsString());
                 DBG(record_decl->getQualifiedNameAsString());
@@ -462,63 +466,46 @@ public:
             return true;
         }
 
-        if (decl->isConstexpr() || (decl->checkInitIsICE() && decl->isUsableInConstantExpressions(*context)))
+        if (!decl->isConstexpr() && !decl->isUsableInConstantExpressions(*context))
         {
-            if (decl->getEvaluatedValue() == nullptr)
-            {
-                DBG_NOTE(Leave VisitVarDecl()[no value]);
-                DBG_NOTE(--------------------);
+            DBG_NOTE(Leave VisitVarDecl()[not constexpr]);
+            DBG_NOTE(--------------------);
 
-                return true;
-            }
+            return true;
+        }
+
+        if (decl->getEvaluatedValue() == nullptr)
+        {
+            DBG_NOTE(Leave VisitVarDecl()[no value]);
+            DBG_NOTE(--------------------);
+
+            return true;
+        }
 
 #ifdef DEBUG_PLUGIN
-            if (decl->getType()->isAnyCharacterType())
-            {
-                DBG(decl->getType()->isCharType());
-                DBG(decl->getType()->isWideCharType());
-                DBG(decl->getType()->isChar8Type());
-                DBG(decl->getType()->isChar16Type());
-                DBG(decl->getType()->isChar32Type());
-            }
-            if (decl->getEvaluatedValue()->isInt())
-            {
-                DBG(decl->getEvaluatedValue()->getInt().getExtValue());
-                DBG(decl->getEvaluatedValue()->getInt().getSExtValue());
-                DBG(decl->getEvaluatedValue()->getInt().getZExtValue());
-            }
-            if (decl->getEvaluatedValue()->isFloat())
-            {
-                DBG(decl->getEvaluatedValue()->getFloat().convertToFloat());
-                DBG(decl->getEvaluatedValue()->getFloat().convertToDouble());
-            }
-            if (decl->getEvaluatedValue()->isStruct())
-            {
-                for (unsigned base_index = 0; base_index < decl->getEvaluatedValue()->getStructNumBases(); ++base_index)
-                {
-                    DBG(base_index);
-                    auto base = decl->getEvaluatedValue()->getStructBase(base_index);
-
-                    for (unsigned base_field_index = 0; base_field_index < base.getStructNumFields(); ++base_field_index)
-                    {
-                        DBG(base_field_index);
-                        auto base_field = base.getStructField(base_field_index);
-                        DBG(base_field.getAsString(*context, decl->getType()));
-                    }
-                    // DBG(base.getAsString(*context, decl->getType()));
-                }
-                for (unsigned field_index = 0; field_index < decl->getEvaluatedValue()->getStructNumFields(); ++field_index)
-                {
-                    DBG(field_index);
-                    auto field = decl->getEvaluatedValue()->getStructField(field_index);
-                    DBG(field.getAsString(*context, decl->getType()));
-                }
-            }
+        if (decl->getType()->isAnyCharacterType())
+        {
+            DBG(decl->getType()->isCharType());
+            DBG(decl->getType()->isWideCharType());
+            DBG(decl->getType()->isChar8Type());
+            DBG(decl->getType()->isChar16Type());
+            DBG(decl->getType()->isChar32Type());
+        }
+        if (decl->getEvaluatedValue()->isInt())
+        {
+            DBG(decl->getEvaluatedValue()->getInt().getExtValue());
+            DBG(decl->getEvaluatedValue()->getInt().getSExtValue());
+            DBG(decl->getEvaluatedValue()->getInt().getZExtValue());
+        }
+        if (decl->getEvaluatedValue()->isFloat())
+        {
+            DBG(decl->getEvaluatedValue()->getFloat().convertToFloat());
+            DBG(decl->getEvaluatedValue()->getFloat().convertToDouble());
+        }
 #endif // DEBUG_PLUGIN
 
-            cout << decl->getQualifiedNameAsString() << "="
-                 << ValueInfo(*decl->getEvaluatedValue(), decl->getType(), *context) << endl;
-        }
+        cout << decl->getQualifiedNameAsString() << "="
+             << ValueInfo(*decl->getEvaluatedValue(), decl->getType(), *context) << endl;
 
         DBG_NOTE(Leave VisitVarDecl());
         DBG_NOTE(--------------------);
@@ -620,7 +607,7 @@ public:
         {
 #ifdef WARN_POSSIBLE_CONSTEXPR
             auto var = GetParent<VarDecl>(*context, *literal, [](const VarDecl &decl) { return !decl.isLocalVarDeclOrParm() || decl.isLocalVarDecl(); });
-            if (!(var->isConstexpr() || (var->checkInitIsICE() && var->isUsableInConstantExpressions(*context))))
+            if (!var->isConstexpr() && !var->isUsableInConstantExpressions(*context))
             {
                 DiagnosticsEngine &diagEngine = context->getDiagnostics();
                 unsigned diagID = diagEngine.getCustomDiagID(DiagnosticsEngine::Warning, "Variable could be marked constexpr");
@@ -652,11 +639,11 @@ public:
             }
             name = owning_func->getQualifiedNameAsString() + "()";
         }
-        else if (const auto *owning_namespace = GetParent<NamespaceDecl>(*context, *literal))
+        else if (const auto *owning_decl = GetParent<NamedDecl>(*context, *literal))
         {
-            DBG(owning_namespace->getNameAsString());
-            DBG(owning_namespace->getQualifiedNameAsString());
-            name = owning_namespace->getQualifiedNameAsString();
+            DBG(owning_decl->getNameAsString());
+            DBG(owning_decl->getQualifiedNameAsString());
+            name = owning_decl->getQualifiedNameAsString();
         }
         name += "::(literal)";
 
