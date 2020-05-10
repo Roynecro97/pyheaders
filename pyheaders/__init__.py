@@ -87,10 +87,10 @@ def load_path(*paths: _Iterable[_Path], extra_args: _Iterable[_Text] = None,
         if os.path.isfile(path):
             source_files.add(path)
         elif os.path.isdir(path):
-            source_files |= set(os.path.join(dirpath, filename) for dirpath, _, files in os.walk(path) for filename in files
-                                if os.path.splitext(filename)[-1] in compiler.CPP_SOURCE_FILES_EXTENSIONS)
+            source_files |= {os.path.join(dirpath, filename) for dirpath, _, files in os.walk(path) for filename in files
+                                if os.path.splitext(filename)[-1] in compiler.CPP_SOURCE_FILES_EXTENSIONS}
         else:
-            source_files |= set(path for path in glob.iglob(path, recursive=True) if os.path.isfile(path))
+            source_files |= {path for path in glob.iglob(path, recursive=True) if os.path.isfile(path)}
 
     excludes = excludes or []
     for path in excludes:
