@@ -5,8 +5,10 @@ This module is a C++ header/source parsing library that allows getting constants
 into Python code.
 '''
 import os
+import glob
 
-from typing import AnyStr as _Path, Dict as _Dict, IO as _IO, Iterable as _Iterable, Text as _Text, Tuple as _Tuple
+from typing import AnyStr as _Path, Dict as _Dict, IO as _IO, Iterable as _Iterable, \
+    Text as _Text, Tuple as _Tuple, List as _List
 from dataclasses import dataclass as _dataclass, field as _field
 
 from . import compiler, cpp, parser, parsers, utils
@@ -55,45 +57,51 @@ def _load_file(filename: _Path, /, extra_args: _Iterable[_Text] = None, *, verbo
                    clang.get_macros(filename, extra_args, **run_plugin_kwargs))
 
 
-def load_path(path: _Path, /, extra_args: _Iterable[_Text] = None, *, verbose: bool = False,
-              initial_scope: cpp.Scope = None, clang_path: _Path = None,
-              commands_parser: compiler.CommandsParser = None, **run_plugin_kwargs) -> SrcData:
+def load_path(*paths: _Iterable[_Path], extra_args: _Iterable[_Text] = None,
+              verbose: bool = False, initial_scope: cpp.Scope = None,
+              clang_path: _Path = None, commands_parser: compiler.CommandsParser = None,
+              excludes: _List = None, **run_plugin_kwargs) -> SrcData:
     '''
     Load all constants from ``path`` (a ``str`` or ``bytes`` instance containing a
     path to a file or a directory containing C++ code) to a Python object.
 
-    @param path         The path of the file or directory to load. If a directory is
+    @param paths        The paths of the files/directories to load. If a directory is
                         given, all files whose extension is recognized as a C/C++ source
-                        code extension are loaded.
+                        code extension are loaded. A glob path is accepted as well.
     @param extra_args   Additional compilation arguments on top of the compile commands.
     @param verbose      If ``True`` is provided, don't suppress compiler errors.
     @param initial_scope The initial scope to use, defaults to a new empty scope.
     @param clang_path   The full path of the clang executable.
     @param commands_parser The CommandsParser object the compiler should use.
     @param run_plugin_kwargs Additional args for run_plugin().
+    @param excludes     List of glob paths to exclude when searching within a directory.
 
-    @returns Scope
+    @returns SrcData
     '''
-    if os.path.isfile(path):
-        return _load_file(path, extra_args=extra_args, verbose=verbose, initial_scope=initial_scope, **run_plugin_kwargs)
+    returned_data = SrcData()
+    if initial_scope is not None:
+        returned_data.scope = initial_scope
 
-    if os.path.isdir(path):
-        returned_data = SrcData()
-        if initial_scope is not None:
-            returned_data.scope = initial_scope
+    source_files = set()
+    for path in paths:
+        if os.path.isfile(path):
+            source_files.add(path)
+        elif os.path.isdir(path):
+            source_files |= set(os.path.join(dirpath, filename) for dirpath, _, files in os.walk(path) for filename in files
+                                if os.path.splitext(filename)[-1] in compiler.CPP_SOURCE_FILES_EXTENSIONS)
+        else:
+            source_files |= set(path for path in glob.iglob(path, recursive=True) if os.path.isfile(path))
 
-        source_files = (os.path.join(dirpath, filename) for dirpath, _, files in os.walk(path) for filename in files
-                        if os.path.splitext(filename)[-1] in compiler.CPP_SOURCE_FILES_EXTENSIONS)
-        for filename in source_files:
-            filename = os.path.join(path, filename)
+    excludes = excludes or []
+    for path in excludes:
+        source_files -= set(glob.iglob(path, recursive=True))
 
-            returned_data.update(_load_file(filename, extra_args=extra_args, verbose=verbose,
-                                            initial_scope=returned_data.scope, exec_path=clang_path,
-                                            commands_parser=commands_parser, **run_plugin_kwargs))
+    for filename in source_files:
+        returned_data.update(_load_file(filename, extra_args=extra_args, verbose=verbose,
+                                        initial_scope=returned_data.scope, exec_path=clang_path,
+                                        commands_parser=commands_parser, **run_plugin_kwargs))
 
-        return returned_data
-
-    raise ValueError('path is neither a file nor a directory.')
+    return returned_data
 
 
 def loads(code: _Text, /, extra_args: _Iterable[_Text] = None, *, verbose: bool = False,

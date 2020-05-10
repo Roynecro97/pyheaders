@@ -179,7 +179,6 @@ class CommandsParser:
     @lru_cache
     def __get_compile_commands(filename: AnyStr) -> CompileCommands:
         commands_filename = CommandsParser._find_compile_commands(os.path.dirname(filename))
-
         if commands_filename and os.path.isfile(commands_filename):
             with open(commands_filename) as commands_file:
                 return json.load(commands_file)

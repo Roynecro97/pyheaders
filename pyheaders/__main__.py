@@ -31,10 +31,12 @@ def handle_print(args, data):
 
     return True
 
+
 def _var_in_data(var_type, var_name, data):
     if var_type == "macro":
         return var_name in data.macros
     return var_name in data.scope
+
 
 def handle_get(args, data):
     '''
@@ -89,6 +91,8 @@ def main():
     base_parser = argparse.ArgumentParser(add_help=False)
     base_parser.add_argument('files', metavar='file', nargs='+',
                              help="The files and directories that the constants are loaded from")
+    base_parser.add_argument('--exclude', dest="excludes", action='append',
+                             help="The files and directories that will be excluded from the search")
     base_parser.add_argument('--clang-path', help="The full path to the clang executable")
 
     compile_commands_flags = base_parser.add_mutually_exclusive_group()
@@ -125,10 +129,8 @@ def main():
 
     args, extra_args = parser.parse_known_args()
     try:
-        data = SrcData()
-        for filename in args.files:
-            data.update(load_path(filename, extra_args, initial_scope=data.scope, clang_path=args.clang_path,
-                                  commands_parser=args.commands_parser, verbose=args.verbose, ignore_cmds=args.ignore_cmds))
+        data = load_path(*args.files, extra_args=extra_args, clang_path=args.clang_path, verbose=args.verbose,
+                         commands_parser=args.commands_parser, ignore_cmds=args.ignore_cmds, excludes=args.excludes)
     except PluginError:
         sys.exit(1)
     success = args.cmd(args, data)
