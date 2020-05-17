@@ -63,10 +63,10 @@ def compile_commands(path):
     '''
     Creates a CommandsParser, used as an argparse argument type
     '''
-    CommandsParser(commands_path=path)
+    return CommandsParser(commands_path=path)
 
 
-class AppendWithName(argparse.Action):
+class AppendWithName(argparse.Action):  # pylint: disable=too-few-public-methods
     '''
     Action that appends the given flag values to a list in a tuple with the flag name.
 
@@ -85,8 +85,8 @@ def main():
     '''
     pyheaders' main entrypoint.
     '''
-    parser = argparse.ArgumentParser()
-    subparsers = parser.add_subparsers()
+    parser = argparse.ArgumentParser(description="A command-line tool for parsing C++ source/header files")
+    subparsers = parser.add_subparsers(dest="print/get", required=True)
 
     base_parser = argparse.ArgumentParser(add_help=False)
     base_parser.add_argument('files', metavar='file', nargs='+',
