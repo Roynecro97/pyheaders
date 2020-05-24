@@ -204,7 +204,7 @@ ostream &operator<<(ostream &os, const ValueInfo &value_info)
         }
         if (type->isArrayType())
         {
-            const auto element_type = QualType(type->getPointeeOrArrayElementType(), Qualifiers::Const);
+            const auto element_type = type->getAsArrayTypeUnsafe()->getElementType();
 
             const auto array_size = [&element_type](const APValue &value, const QualType &type) {
                 const auto real_size = value.getArraySize();
@@ -414,6 +414,11 @@ public:
         if (decl->getType()->isArrayType() || decl->getType()->isPointerType())
         {
             DBG(QualType(decl->getType()->getPointeeOrArrayElementType(), Qualifiers::Const).getAsString());
+        }
+        if (decl->getType()->isArrayType())
+        {
+            auto arr_type = decl->getType()->getAsArrayTypeUnsafe();
+            DBG(arr_type->getElementType().getAsString());
         }
 
         if (decl->getType()->isRecordType())
