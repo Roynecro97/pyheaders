@@ -37,19 +37,12 @@ class Record(Scope):
             field_names = field_names.replace(',', ' ').split()
 
         safe_names = []
-        seen = {}
-        for index, name in reversed(tuple(enumerate(field_names))):
-            if not name.isidentifier() or iskeyword(name):
-                name = f'_{index}'
-            elif name in seen:
-                new_name = f'{name}_{seen[name]}'
-                safe_names.insert(0, new_name)
-                seen[name] += 1
-                name = new_name
-            elif name.startswith('_'):
-                name = name.lstrip('_')
+        seen = set()
+        for name in reversed(tuple(field_names)):
+            if name in seen:
+                name = f'_{name}'
             safe_names.insert(0, name)
-            seen[name] = seen.get(name, 0) + 1
+            seen.add(name)
         return safe_names
 
     def __init__(self, name: Text, field_names: Union[Text, Iterable[Text]], base_scope: Iterable[Tuple[Text, Any]] = None):
@@ -64,7 +57,9 @@ class Record(Scope):
             module, name = split(remove_template(self.__name))
             if not module:
                 module = ''
-            self.__type = namedtuple(name, self.__fields, module=module.replace(Scope.SEP, '.'))
+            if iskeyword(name):
+                name = f'_{name}'
+            self.__type = namedtuple(name, self.__fields, module=module.replace(Scope.SEP, '.'), rename=True)
 
     @property
     def name(self):

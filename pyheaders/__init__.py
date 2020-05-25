@@ -6,6 +6,7 @@ into Python code.
 '''
 import os
 import glob
+import fnmatch
 
 from typing import AnyStr as _Path, Dict as _Dict, IO as _IO, Iterable as _Iterable, \
     Text as _Text, Tuple as _Tuple, List as _List
@@ -93,8 +94,8 @@ def load_path(*paths: _Iterable[_Path], extra_args: _Iterable[_Text] = None,
             source_files |= {path for path in glob.iglob(path, recursive=True) if os.path.isfile(path)}
 
     excludes = excludes or []
-    for path in excludes:
-        source_files -= set(glob.iglob(path, recursive=True))
+    for exclude_pattern in excludes:
+        source_files -= set(fnmatch.filter(source_files, f'**{exclude_pattern}'))
 
     for filename in source_files:
         returned_data.update(_load_file(filename, extra_args=extra_args, verbose=verbose,
