@@ -375,6 +375,13 @@ public:
         DBG(decl->getNameAsString());          // bar
         DBG(decl->getQualifiedNameAsString()); // foo::bar
         DBG(decl->getIntegerType().getAsString());
+        DBG(decl->isTemplated());
+
+        // Exclude template definitions
+        if (decl->isTemplated())
+        {
+            return true;
+        }
 
         cout << "enum " << decl->getQualifiedNameAsString() << " {" << endl;
         for (auto &&enum_constant_decl : decl->enumerators())
@@ -409,6 +416,7 @@ public:
         DBG(decl->getType()->isArrayType());
         DBG(decl->getType()->isConstantArrayType());
         DBG(decl->getType()->isPointerType());
+        DBG(decl->isTemplated());
 
 #ifdef DEBUG_PLUGIN
         if (decl->getType()->isArrayType() || decl->getType()->isPointerType())
