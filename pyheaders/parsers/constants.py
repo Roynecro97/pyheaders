@@ -17,9 +17,9 @@ class ConstantsParser(ParserBase):
     # Don't allow =() to follow the name unless the end of the line follows it.
     # This is to capture "operator<=()::something=10" as "operator<=()::something" and "10"
     # instead of "operator<" and "()::something=10".
-    #                                                 +------------------+
-    #                                                 |                  |
-    VALUE_MATCHER = re.compile(r'^\s*(?P<name>[^#].*?)(?!=\(\)(?![\s,]*$))\s*=\s*(?P<value>.+?)\s*,?\s*$')
+    #                                                 +------------------------+
+    #                                                 |                        |
+    VALUE_MATCHER = re.compile(r'^\s*(?P<name>[^#].*?)(?!=[=>]|=\(\)(?![\s,]*$))\s*=\s*(?P<value>.+?)\s*,?\s*$')
 
     def parse_line(self, line: Text, context: Context) -> bool:
         value_match: Optional[re.Match]
