@@ -16,7 +16,7 @@ if os.path.exists(README_PATH):
 
 setuptools.setup(
     name='pyheaders',
-    version='0.0.4',
+    version='0.0.5',
     url='https://github.com/Roynecro97/pyheaders',
     project_urls={
         "Source Code": 'https://github.com/Roynecro97/pyheaders'
@@ -28,6 +28,7 @@ setuptools.setup(
     long_description=LONG_DESCRIPTION,
     long_description_content_type='text/markdown',
     install_requires=[],
+    python_requires='>=3.8',
     packages=setuptools.find_packages(exclude=['test']),
     data_files=[('plugins', glob.glob(PLUGINS))],
     zip_safe=False,  # Maybe True?

@@ -16,6 +16,9 @@ PARENS_END = ')'
 TEMPLATE_START = '<'
 TEMPLATE_END = '>'
 
+OPERATOR_KW = 'operator'
+OPERATOR_PROBLEMATIC_CHARS = f'{TEMPLATE_START}={TEMPLATE_END}'
+
 ALL_BRACKETS = {PARENS_START: PARENS_END, '[': ']', '{': '}', TEMPLATE_START: TEMPLATE_END}
 assert all(len(start) == len(end) == 1 for start, end in ALL_BRACKETS.items())
 
@@ -106,9 +109,9 @@ def remove_template(name):
     res = ''
     in_template = 0
     for char in name:
-        if char == TEMPLATE_START:
+        if char == TEMPLATE_START and not res.rstrip(OPERATOR_PROBLEMATIC_CHARS).endswith(OPERATOR_KW):  # <*
             in_template += 1
-        elif char == TEMPLATE_END:
+        elif char == TEMPLATE_END and not res.rstrip(OPERATOR_PROBLEMATIC_CHARS).endswith(OPERATOR_KW):  # <=>, >*
             if in_template == 0:
                 raise ValueError(f"unexpected {char!r}")
             in_template -= 1

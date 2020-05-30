@@ -7,7 +7,7 @@ import re
 from collections import OrderedDict
 from typing import Any, Optional, Pattern, Text, Tuple
 
-from .types import TEMPLATE_START, TEMPLATE_END
+from .types import OPERATOR_KW as _OP_KW, OPERATOR_PROBLEMATIC_CHARS as _PROBLEMATIC_CHARS, TEMPLATE_START, TEMPLATE_END
 
 
 class Scope(OrderedDict):
@@ -30,12 +30,12 @@ class Scope(OrderedDict):
         template_level = 0
         i = 0
         while i < len(name):
-            if name[i] == TEMPLATE_START:
+            if name[i] == TEMPLATE_START and not name[:i].rstrip(_PROBLEMATIC_CHARS).endswith(_OP_KW):  # <*
                 template_level += 1
-            elif name[i] == TEMPLATE_END:
+            elif name[i] == TEMPLATE_END and not name[:i].rstrip(_PROBLEMATIC_CHARS).endswith(_OP_KW):  # <=>, >*
                 template_level -= 1
 
-            if name.find(Scope.SEP, i, i + len(Scope.SEP)) == i and template_level:
+            if template_level and name.find(Scope.SEP, i, i + len(Scope.SEP)) == i:
                 safe_name += Scope._PLACEHOLDER * len(Scope.SEP)
                 i += len(Scope.SEP)
             else:
