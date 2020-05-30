@@ -219,17 +219,20 @@ ostream &operator<<(ostream &os, const ValueInfo &value_info)
             }(value, type); // structured binding cannot be captured
 
             // Handle char, signed char, unsigned char (regular strings)
-            if (type->getPointeeOrArrayElementType()->isCharType())
+            if (element_type->isCharType())
             {
-                os << string_delim;
-                for (unsigned i = 0; i < array_size; ++i)
+                if (element_type.getCanonicalType().getAsString() == element_type.getAsString())
                 {
-                    os << CharInfo(static_cast<char>(value.getArrayInitializedElt(i).getInt().getExtValue()), string_delim);
+                    os << string_delim;
+                    for (unsigned i = 0; i < array_size; ++i)
+                    {
+                        os << CharInfo(static_cast<char>(value.getArrayInitializedElt(i).getInt().getExtValue()), string_delim);
+                    }
+                    return os << string_delim;
                 }
-                return os << string_delim;
             }
             // Handle wchar_t, char8_t, char16_t, char32_t (special encoding strings)
-            if (type->getPointeeOrArrayElementType()->isAnyCharacterType())
+            else if (element_type->isAnyCharacterType())
             {
                 os << element_type.getCanonicalType().getUnqualifiedType().getAsString() << "[]";
             }
