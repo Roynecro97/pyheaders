@@ -400,8 +400,10 @@ class Clang:
         '''
         pp_output = self.preprocess(filename, extra_args=['-dM'] + list(extra_args or []), trim=False, **kwargs)
 
-        if "ignore_cmds" in kwargs:
-            kwargs.pop("ignore_cmds")
+        # Remove keyword arguments we don't want to pass to our special expansion preprocessor
+        kwargs.pop('ignore_cmds', None)
+        kwargs.pop('stdin', None)
+        kwargs.pop('input', None)
 
         macro_names = re.findall(r'^#define (?P<name>\w+)(?!\(.*\))(?: |$)', pp_output, flags=re.M)
 
