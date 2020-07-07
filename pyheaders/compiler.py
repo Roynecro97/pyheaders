@@ -311,7 +311,7 @@ class CommandsParser:
 
         @param entry The entire command dictionary.
         '''
-        args = shlex.split(entry['command'])
+        args = shlex.split(entry['command']) if 'command' in entry else entry['arguments']
 
         for pattern, arg_count in self.exclude.items():
             args = CommandsParser.__filter_by_regex(pattern, arg_count, args)
