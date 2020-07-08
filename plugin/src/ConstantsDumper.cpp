@@ -11,8 +11,8 @@
 #include <ios>
 #include <iostream>
 #include <iterator>
+#include <sstream>
 #include <string>
-#include <string_view>
 #include <tuple>
 
 using namespace std;
@@ -639,7 +639,7 @@ public:
         }
 
         // Generate a name: namespaces::func_name()::(literal) or namespaces::(literal) or ::(literal)
-        string name;
+        ostringstream name;
         if (const auto *owning_func = GetParent<FunctionDecl>(*context, *literal))
         {
             DBG(owning_func->getNameAsString());
@@ -653,15 +653,26 @@ public:
 
                 return true;
             }
-            name = owning_func->getQualifiedNameAsString() + "()";
+            name << owning_func->getQualifiedNameAsString() << '(';
+            const auto param_count = owning_func->getNumParams();
+            for (unsigned i = 0; i < param_count; ++i)
+            {
+                DBG(owning_func->getParamDecl(i)->getType().getAsString());
+                name << owning_func->getParamDecl(i)->getType().getAsString();
+                if (i < param_count - 1)
+                {
+                    name << ", ";
+                }
+            }
+            name << ')';
         }
         else if (const auto *owning_decl = GetParent<NamedDecl>(*context, *literal))
         {
             DBG(owning_decl->getNameAsString());
             DBG(owning_decl->getQualifiedNameAsString());
-            name = owning_decl->getQualifiedNameAsString();
+            name << owning_decl->getQualifiedNameAsString();
         }
-        name += "::(literal)";
+        name << "::(literal)";
 
         Expr::EvalResult result;
         if (!literal->EvaluateAsConstantExpr(result, Expr::ConstExprUsage::EvaluateForCodeGen, *context))
@@ -672,7 +683,7 @@ public:
             return true;
         }
         DBG(result.Val.getAsString(*context, literal->getType()));
-        cout << "#literal " << name << "=" << ValueInfo(result.Val, literal->getType(), *context) << endl;
+        cout << "#literal " << name.str() << "=" << ValueInfo(result.Val, literal->getType(), *context) << endl;
 
         DBG_NOTE(Leave VisitStringLiteral());
         DBG_NOTE(--------------------------);
