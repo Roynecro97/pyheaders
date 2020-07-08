@@ -54,6 +54,8 @@ using ValueInfo = tuple<const APValue &, const QualType &, const ASTContext &>;
 //                              record,         last
 using RecordInfo = tuple<const CXXRecordDecl *, bool>;
 
+inline constexpr decltype(auto) OUTPUT_EQ = ":=";
+
 inline constexpr auto char_delim = '\'';
 inline constexpr auto string_delim = '"';
 inline constexpr auto escape_char = '\\';
@@ -206,7 +208,7 @@ ostream &operator<<(ostream &os, const ValueInfo &value_info)
         {
             const auto element_type = type->getAsArrayTypeUnsafe()->getElementType();
 
-            const auto array_size = [&element_type](const APValue &value, const QualType &type) {
+            const auto array_size = [&element_type](const APValue &value) {
                 const auto real_size = value.getArraySize();
                 if (element_type->isAnyCharacterType() &&
                     (!element_type->isCharType() || element_type.getCanonicalType().getAsString() == element_type.getAsString()) &&
@@ -216,7 +218,7 @@ ostream &operator<<(ostream &os, const ValueInfo &value_info)
                     return real_size - 1;
                 }
                 return real_size;
-            }(value, type); // structured binding cannot be captured
+            }(value); // structured binding cannot be captured
 
             // Handle char, signed char, unsigned char (regular strings)
             if (element_type->isCharType())
@@ -389,7 +391,7 @@ public:
         cout << "enum " << decl->getQualifiedNameAsString() << " {" << endl;
         for (auto &&enum_constant_decl : decl->enumerators())
         {
-            cout << enum_constant_decl->getQualifiedNameAsString() << "="
+            cout << enum_constant_decl->getQualifiedNameAsString() << OUTPUT_EQ
                  << ValueInfo(APValue(enum_constant_decl->getInitVal()), decl->getIntegerType(), *context)
                  << "," << endl;
         }
@@ -520,7 +522,7 @@ public:
         }
 #endif // DEBUG_PLUGIN
 
-        cout << decl->getQualifiedNameAsString() << "="
+        cout << decl->getQualifiedNameAsString() << OUTPUT_EQ
              << ValueInfo(*decl->getEvaluatedValue(), decl->getType(), *context) << endl;
 
         DBG_NOTE(Leave VisitVarDecl());
@@ -683,7 +685,7 @@ public:
             return true;
         }
         DBG(result.Val.getAsString(*context, literal->getType()));
-        cout << "#literal " << name.str() << "=" << ValueInfo(result.Val, literal->getType(), *context) << endl;
+        cout << "#literal " << name.str() << OUTPUT_EQ << ValueInfo(result.Val, literal->getType(), *context) << endl;
 
         DBG_NOTE(Leave VisitStringLiteral());
         DBG_NOTE(--------------------------);
@@ -795,7 +797,7 @@ public:
         }
         DBG(result.Val.getAsString(*context, result_type));
 
-        cout << decl->getQualifiedNameAsString() << "=" << ValueInfo(result.Val, result_type, *context) << endl;
+        cout << decl->getQualifiedNameAsString() << OUTPUT_EQ << ValueInfo(result.Val, result_type, *context) << endl;
 
         DBG_NOTE(Leave VisitFunctionDecl());
         DBG_NOTE(-------------------------);
