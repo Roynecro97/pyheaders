@@ -197,7 +197,7 @@ DEFAULT_TYPES = {
 DEFAULT_TYPES['wchar_t[]'].__name__ = DEFAULT_TYPES['wchar_t[]'].__qualname__ = 'wchar_t[]'
 
 
-def parse_value(raw_value: Text, /, scope: Optional[AnyScope] = None) -> Any:
+def parse_value(raw_value: Text, /, scope: Optional[AnyScope] = None) -> Any:  # pylint: disable=too-many-return-statements
     '''
     Parse a single value, recursively.
 
