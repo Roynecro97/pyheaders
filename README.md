@@ -8,7 +8,7 @@ C++ header (and source) parser for Python using Clang plugins.
 
    - You'll need to have clang-10 and the required dev tools installed.
 
-     To install using `apt` on Debian / Ubuntu see then [LLVM Debian/Ubuntu nightly packages](apt.llvm.org) page.
+     To install using `apt` on Debian / Ubuntu see [LLVM Debian/Ubuntu nightly packages](https://apt.llvm.org) page.
 
    - Note that _pyheaders_ requires Python>=3.8.
 
@@ -49,6 +49,11 @@ _pyheaders_ can be imported and used as a module.
 
 It provides 3 main functions: `load_path`, `load` and `loads`.
 
+All 3 functions return a `pyheaders.SrcData` object that has 2 properties:
+
+- `scope` - The C++ global scope that was parsed from the provided code.
+- `macros` - A dictionary with all non-function macros that were generated.
+
 ### Using the Provided Functions
 
 Both `load` and `loads` behave similarly to the similarly named functions in the `json` and `pickle` modules.
@@ -65,9 +70,9 @@ Assuming source.cpp contains the line
 import pyheaders
 
 with open('source.cpp') as f:
-    scope = pyheaders.load(f)
+    data = pyheaders.load(f)
 
-print(scope['x'])
+print(data.scope['x'])
 ```
 
 _Output:_
@@ -85,7 +90,7 @@ namespace constants {
 }
 '''
 
-scope = pyheaders.loads(cpp_code, ['-std=c++17'])
+scope, macros = pyheaders.loads(cpp_code, ['-std=c++17'])
 
 print(scope['constants::greeting'])
 ```
@@ -112,7 +117,7 @@ Assuming src/ contains a file with:
 ```python
 import pyheaders
 
-scope = pyheaders.load_path('src/')
+scope = pyheaders.load_path('src/').scope
 
 print(scope['MyClass::magic'])
 ```
