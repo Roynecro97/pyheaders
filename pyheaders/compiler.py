@@ -11,7 +11,7 @@ import sys
 from contextlib import contextmanager
 from functools import lru_cache
 from itertools import chain
-from typing import AnyStr, Dict, Iterable, List, Pattern, Text, Tuple
+from typing import AnyStr, Callable, Dict, Iterable, List, Pattern, Text, Tuple
 from warnings import warn
 
 
@@ -143,7 +143,7 @@ class CommandsParser:
                 with open(commands_path) as commands_fd:
                     commands = json.load(commands_fd)
 
-                self.__commands_getter = lambda filename: commands
+                self.__commands_getter = lambda filename: os.path.dirname(commands_path), commands
             else:
                 warn(f"Ignoring the provided commands_path. Reason: missing: '{commands_path}' is not a file.",
                      category=MissingCompileCommands, stacklevel=2)
@@ -157,6 +157,7 @@ class CommandsParser:
         self.exclude = exclude_flags
 
     @staticmethod
+    @lru_cache
     def _find_compile_commands(start_at: AnyStr = None) -> AnyStr:
         '''
         Find the compile commands json file.
@@ -177,12 +178,80 @@ class CommandsParser:
 
     @staticmethod
     @lru_cache
-    def __get_compile_commands(filename: AnyStr) -> CompileCommands:
+    def __get_compile_commands(filename: AnyStr) -> Tuple[AnyStr, CompileCommands]:
         commands_filename = CommandsParser._find_compile_commands(os.path.dirname(filename))
         if commands_filename and os.path.isfile(commands_filename):
             with open(commands_filename) as commands_file:
-                return json.load(commands_file)
-        return []
+                return os.path.dirname(commands_filename), json.load(commands_file)
+        return os.getcwd(), []
+
+    @staticmethod
+    @lru_cache
+    def __fix_path(start_at: AnyStr, cmd_path: AnyStr, check: Callable[[AnyStr], bool]) -> AnyStr:
+        '''
+        Attempts to fix a broken path.
+
+        @param start_at The absolute path to use as a base current path.
+        @param cmd_path The broken path from the command.
+        @param check    A predicate that determines whether the path is valid (os.path.isdir or
+                        os.path.isfile)
+
+        @returns AnyStr A valid (and hopefully correct) absolute path to use.
+        '''
+        cmd_path = cmd_path.lstrip(os.path.sep)
+        for reverse_sep_idx in range(cmd_path.count(os.path.sep)):
+            cmd_path_fragment = cmd_path.split(os.path.sep, reverse_sep_idx)[-1]
+            if start_at.endswith(cmd_path_fragment):
+                return start_at
+            if check(fixed_path := os.path.join(start_at, cmd_path_fragment)):
+                return fixed_path
+        return start_at
+
+    @staticmethod
+    @lru_cache
+    def __get_path(start_at: AnyStr, cmd_path: AnyStr, check: Callable[[AnyStr], bool]) -> AnyStr:
+        '''
+        Returns an absolute path from a path in the compile commands.
+        If the path in the compile commands is relative, it is converted to be relative to
+        `start_at`.
+        If the path is a missing absolute path, `__get_path()` attempts to fix it by slowly
+        removing directories from the beginning of the command's path and using the reminder
+        as a relative path.
+
+        @param start_at The path to use as a base current path.
+        @param cmd_path The path from the command.
+        @param check    A predicate that determines whether the path is valid (os.path.isdir or
+                        os.path.isfile)
+
+        @returns AnyStr A valid (and hopefully correct) absolute path to use.
+        '''
+        start_at = os.path.abspath(start_at)
+        path = os.path.join(start_at, cmd_path)
+        if os.path.isabs(cmd_path) and not check(path):
+            path = CommandsParser.__fix_path(start_at, cmd_path, check)
+        return path
+
+    @staticmethod
+    @lru_cache
+    def __dir_score(wanted_path: AnyStr, cmd_directory: AnyStr) -> int:
+        '''
+        Returns the number of directories in `cmd_directory` that match `wanted_path`.
+
+        @param wanted_path      The absolute path to compare to.
+        @param cmd_directory    The value of the "directory" entry of a compile command.
+
+        @returns int    The number of matching directories.
+        '''
+        count = 0
+        mismatch_found = False
+        wanted_path = wanted_path.split(os.path.sep)
+        cmd_directory = cmd_directory.split(os.path.sep)
+        for wanted_dir, cmd_dir in zip(wanted_path, cmd_directory):
+            if wanted_dir != cmd_dir or mismatch_found:
+                count -= 1
+            else:
+                count += 1
+        return count - abs(len(wanted_path) - len(cmd_directory))
 
     @lru_cache
     def _find_in_commands(self, filename: AnyStr) -> CompileCommandsEntry:
@@ -190,26 +259,38 @@ class CommandsParser:
         Find the commands to compile `filename`.
         `None` is returned if no such command is found.
 
-        @param filename The file to look for.
+        @param filename The absolute path of file to look for.
         @param commands A compile_commands.json style dictionary.
         '''
         if isinstance(filename, bytes):
             filename = filename.decode()
 
-        close_cmd = None
+        close_cmd: CompileCommandsEntry = None
         loose_match = re.compile(re.escape(os.path.splitext(filename)[0]) +
                                  rf'(?:{"|".join(CommandsParser.__C_CPP_SOURCE_FILES_EXTENSIONS)})$')
 
-        commands = self.__commands_getter(filename)
+        distant_cmd: CompileCommandsEntry = None
+        distant_cmd_value = -1
+        file_dir = os.path.dirname(filename)
+
+        commands_start_path, commands = self.__commands_getter(filename)
         for cmd in commands:
-            cmd_file = os.path.abspath(os.path.join(cmd['directory'], cmd['file']))
-            if cmd_file == filename:
+            cmd['directory'] = CommandsParser.__get_path(commands_start_path, cmd['directory'], os.path.isdir)
+            cmd['file'] = CommandsParser.__get_path(cmd['directory'], cmd['file'], os.path.isfile)
+
+            if cmd['file'] == filename:
                 return cmd
 
-            if loose_match.search(cmd_file):
+            if loose_match.search(cmd['file']):
                 close_cmd = cmd
 
-        return close_cmd
+            if (cmd_value := CommandsParser.__dir_score(file_dir, cmd['directory'])) > distant_cmd_value:
+                distant_cmd = cmd
+                distant_cmd_value = cmd_value
+
+        if close_cmd:
+            return close_cmd
+        return distant_cmd
 
     @staticmethod
     def __filter_by_regex(pattern: Pattern, remove_count: int, args: Iterable[Text]) -> Iterable[Text]:
@@ -230,7 +311,7 @@ class CommandsParser:
 
         @param entry The entire command dictionary.
         '''
-        args = shlex.split(entry['command'])
+        args = shlex.split(entry['command']) if 'command' in entry else entry['arguments']
 
         for pattern, arg_count in self.exclude.items():
             args = CommandsParser.__filter_by_regex(pattern, arg_count, args)
@@ -243,18 +324,6 @@ class CommandsParser:
             args.pop(-1)
 
         return args
-
-    def __common_flags(self, commands: CompileCommands) -> List[Text]:
-        '''
-        Get all flags that are common among for all files.
-
-        @param commands The compile commands.
-        '''
-        flags = None
-        for cmd in commands:
-            cmd_flags = set(self.__get_relevant_args(cmd))
-            flags = flags & cmd_flags if flags is not None else cmd_flags
-        return list(flags)
 
     @lru_cache
     def get_args(self, filename: AnyStr) -> Tuple[Text, List[Text]]:
@@ -270,9 +339,6 @@ class CommandsParser:
 
             if cmd := self._find_in_commands(filename):
                 return cmd['directory'], self.__get_relevant_args(cmd)
-
-        if compile_commands := self.__commands_getter(filename):
-            return compile_commands[0]['directory'], self.__common_flags(compile_commands)
 
         return os.getcwd(), []
 
