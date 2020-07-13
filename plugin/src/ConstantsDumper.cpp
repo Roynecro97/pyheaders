@@ -666,7 +666,46 @@ public:
                     name << ", ";
                 }
             }
+            DBG(owning_func->isVariadic());
+            if (owning_func->isVariadic())
+            {
+                if (!owning_func->param_empty())
+                {
+                    name << ", ";
+                }
+                name << "...";
+            }
             name << ')';
+
+            DBG(owning_func->isCXXClassMember());
+            DBG(owning_func->isCXXInstanceMember());
+            if (owning_func->isCXXInstanceMember() && isa<CXXMethodDecl>(owning_func))
+            {
+                const auto *owning_member_func = cast<CXXMethodDecl>(owning_func);
+
+                DBG(owning_member_func->isConst());
+                if (owning_member_func->isConst())
+                {
+                    name << " const";
+                }
+                DBG(owning_member_func->isVolatile());
+                if (owning_member_func->isVolatile())
+                {
+                    name << " volatile";
+                }
+
+                switch (owning_member_func->getRefQualifier())
+                {
+                case RefQualifierKind::RQ_LValue:
+                    name << " &";
+                    break;
+                case RefQualifierKind::RQ_RValue:
+                    name << " &&";
+                    break;
+                default:
+                    break;
+                }
+            }
         }
         else if (const auto *owning_decl = GetParent<NamedDecl>(*context, *literal))
         {
