@@ -7,7 +7,8 @@ import re
 from collections import OrderedDict
 from typing import Any, Optional, Pattern, Text, Tuple
 
-from .types import OPERATOR_KW as _OP_KW, OPERATOR_PROBLEMATIC_CHARS as _PROBLEMATIC_CHARS, TEMPLATE_START, TEMPLATE_END
+from .types import OPERATOR_KW as _OP_KW, OPERATOR_PROBLEMATIC_CHARS as _PROBLEMATIC_CHARS
+from .types import TEMPLATE_START, TEMPLATE_END, PARENS_START, PARENS_END
 
 
 class Scope(OrderedDict):
@@ -24,18 +25,25 @@ class Scope(OrderedDict):
     @staticmethod
     def _safe_name(name: Text) -> Text:
         '''
-        Prevent detection of scope separators inside templates
+        Prevent detection of scope separators inside templates or parentheses.
         '''
+        def match_bracket(parenthesis, template):
+            # The second part of the template-related condition is to not catch `r'operator[<>]*'`.
+            # This is not needed for parentheses because the only operator with them is 'operator()',
+            # so we open and close and it's OK.
+            return name[i] == parenthesis or \
+                (name[i] == template and not name[:i].rstrip(_PROBLEMATIC_CHARS).endswith(_OP_KW))
+
         safe_name = ''
-        template_level = 0
+        bracket_level = 0
         i = 0
         while i < len(name):
-            if name[i] == TEMPLATE_START and not name[:i].rstrip(_PROBLEMATIC_CHARS).endswith(_OP_KW):  # <*
-                template_level += 1
-            elif name[i] == TEMPLATE_END and not name[:i].rstrip(_PROBLEMATIC_CHARS).endswith(_OP_KW):  # <=>, >*
-                template_level -= 1
+            if match_bracket(PARENS_START, TEMPLATE_START):
+                bracket_level += 1
+            elif match_bracket(PARENS_END, TEMPLATE_END):
+                bracket_level -= 1
 
-            if template_level and name.find(Scope.SEP, i, i + len(Scope.SEP)) == i:
+            if bracket_level and name.find(Scope.SEP, i, i + len(Scope.SEP)) == i:
                 safe_name += Scope._PLACEHOLDER * len(Scope.SEP)
                 i += len(Scope.SEP)
             else:

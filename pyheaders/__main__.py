@@ -6,7 +6,7 @@ The main entry for the pyheaders package to allow it to run as a command-line to
 import sys
 import argparse
 
-from . import load_path, SrcData
+from . import load_path
 from .compiler import PluginError, CommandsParser
 from .utils import enums, pretty_print, tree
 

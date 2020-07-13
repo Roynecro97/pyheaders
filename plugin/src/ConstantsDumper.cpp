@@ -11,8 +11,8 @@
 #include <ios>
 #include <iostream>
 #include <iterator>
+#include <sstream>
 #include <string>
-#include <string_view>
 #include <tuple>
 
 using namespace std;
@@ -53,6 +53,8 @@ using StructInfo = tuple<const APValue &, const QualType &, const ASTContext &, 
 using ValueInfo = tuple<const APValue &, const QualType &, const ASTContext &>;
 //                              record,         last
 using RecordInfo = tuple<const CXXRecordDecl *, bool>;
+
+inline constexpr decltype(auto) OUTPUT_EQ = ":=";
 
 inline constexpr auto char_delim = '\'';
 inline constexpr auto string_delim = '"';
@@ -206,7 +208,7 @@ ostream &operator<<(ostream &os, const ValueInfo &value_info)
         {
             const auto element_type = type->getAsArrayTypeUnsafe()->getElementType();
 
-            const auto array_size = [&element_type](const APValue &value, const QualType &type) {
+            const auto array_size = [&element_type](const APValue &value) {
                 const auto real_size = value.getArraySize();
                 if (element_type->isAnyCharacterType() &&
                     (!element_type->isCharType() || element_type.getCanonicalType().getAsString() == element_type.getAsString()) &&
@@ -216,7 +218,7 @@ ostream &operator<<(ostream &os, const ValueInfo &value_info)
                     return real_size - 1;
                 }
                 return real_size;
-            }(value, type); // structured binding cannot be captured
+            }(value); // structured binding cannot be captured
 
             // Handle char, signed char, unsigned char (regular strings)
             if (element_type->isCharType())
@@ -389,7 +391,7 @@ public:
         cout << "enum " << decl->getQualifiedNameAsString() << " {" << endl;
         for (auto &&enum_constant_decl : decl->enumerators())
         {
-            cout << enum_constant_decl->getQualifiedNameAsString() << "="
+            cout << enum_constant_decl->getQualifiedNameAsString() << OUTPUT_EQ
                  << ValueInfo(APValue(enum_constant_decl->getInitVal()), decl->getIntegerType(), *context)
                  << "," << endl;
         }
@@ -520,7 +522,7 @@ public:
         }
 #endif // DEBUG_PLUGIN
 
-        cout << decl->getQualifiedNameAsString() << "="
+        cout << decl->getQualifiedNameAsString() << OUTPUT_EQ
              << ValueInfo(*decl->getEvaluatedValue(), decl->getType(), *context) << endl;
 
         DBG_NOTE(Leave VisitVarDecl());
@@ -639,7 +641,7 @@ public:
         }
 
         // Generate a name: namespaces::func_name()::(literal) or namespaces::(literal) or ::(literal)
-        string name;
+        ostringstream name;
         if (const auto *owning_func = GetParent<FunctionDecl>(*context, *literal))
         {
             DBG(owning_func->getNameAsString());
@@ -653,15 +655,65 @@ public:
 
                 return true;
             }
-            name = owning_func->getQualifiedNameAsString() + "()";
+            name << owning_func->getQualifiedNameAsString() << '(';
+            const auto param_count = owning_func->getNumParams();
+            for (unsigned i = 0; i < param_count; ++i)
+            {
+                DBG(owning_func->getParamDecl(i)->getType().getAsString());
+                name << owning_func->getParamDecl(i)->getType().getAsString();
+                if (i < param_count - 1)
+                {
+                    name << ", ";
+                }
+            }
+            DBG(owning_func->isVariadic());
+            if (owning_func->isVariadic())
+            {
+                if (!owning_func->param_empty())
+                {
+                    name << ", ";
+                }
+                name << "...";
+            }
+            name << ')';
+
+            DBG(owning_func->isCXXClassMember());
+            DBG(owning_func->isCXXInstanceMember());
+            if (owning_func->isCXXInstanceMember() && isa<CXXMethodDecl>(owning_func))
+            {
+                const auto *owning_member_func = cast<CXXMethodDecl>(owning_func);
+
+                DBG(owning_member_func->isConst());
+                if (owning_member_func->isConst())
+                {
+                    name << " const";
+                }
+                DBG(owning_member_func->isVolatile());
+                if (owning_member_func->isVolatile())
+                {
+                    name << " volatile";
+                }
+
+                switch (owning_member_func->getRefQualifier())
+                {
+                case RefQualifierKind::RQ_LValue:
+                    name << " &";
+                    break;
+                case RefQualifierKind::RQ_RValue:
+                    name << " &&";
+                    break;
+                default:
+                    break;
+                }
+            }
         }
         else if (const auto *owning_decl = GetParent<NamedDecl>(*context, *literal))
         {
             DBG(owning_decl->getNameAsString());
             DBG(owning_decl->getQualifiedNameAsString());
-            name = owning_decl->getQualifiedNameAsString();
+            name << owning_decl->getQualifiedNameAsString();
         }
-        name += "::(literal)";
+        name << "::(literal)";
 
         Expr::EvalResult result;
         if (!literal->EvaluateAsConstantExpr(result, Expr::ConstExprUsage::EvaluateForCodeGen, *context))
@@ -672,7 +724,7 @@ public:
             return true;
         }
         DBG(result.Val.getAsString(*context, literal->getType()));
-        cout << "#literal " << name << "=" << ValueInfo(result.Val, literal->getType(), *context) << endl;
+        cout << "#literal " << name.str() << OUTPUT_EQ << ValueInfo(result.Val, literal->getType(), *context) << endl;
 
         DBG_NOTE(Leave VisitStringLiteral());
         DBG_NOTE(--------------------------);
@@ -784,7 +836,7 @@ public:
         }
         DBG(result.Val.getAsString(*context, result_type));
 
-        cout << decl->getQualifiedNameAsString() << "=" << ValueInfo(result.Val, result_type, *context) << endl;
+        cout << decl->getQualifiedNameAsString() << OUTPUT_EQ << ValueInfo(result.Val, result_type, *context) << endl;
 
         DBG_NOTE(Leave VisitFunctionDecl());
         DBG_NOTE(-------------------------);
