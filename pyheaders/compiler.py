@@ -473,14 +473,22 @@ class Clang:
 
         macro_names = re.findall(r'^#define (?P<name>\w+)(?!\(.*\))(?: |$)', pp_output, flags=re.M)
 
-        # The preprocessor compressed packs of empty lines, so a magic prefix is used to prevent it
-        _MAGIC_PREFIX = ': '  # pylint: disable=invalid-name
-        # A pseudo file is generated to contain all defines and the macros whose expanded forms are needed
-        macro_dumper = pp_output + '\n'.join(f'{_MAGIC_PREFIX}{name}' for name in macro_names) + '\n'
-        macro_definitions = self.preprocess(Clang.STDIN_FILENAME, ['-Wno-macro-redefined'], trim=False,
-                                            input=macro_dumper, ignore_cmds=True, **kwargs).split('\n')[:-1]
+        # The preprocessor compresses packs of empty lines, macros that use _Pragma may expand to more than
+        # a single line, so a magic marker is used.
+        _MARKER = '@'  # pylint: disable=invalid-name
+        _DEFINITION_RE = rf'^{re.escape(_MARKER)} ?([^{_MARKER}]*?) {re.escape(_MARKER)}$'  # pylint: disable=invalid-name
 
-        return dict(zip(reversed(macro_names), (macro_def[len(_MAGIC_PREFIX):] for macro_def in reversed(macro_definitions))))
+        # The macro __has_include() can only be used in preprocessor directives. However, it can appear in
+        # a "SOMELIB_USES_X" macro and cause errors during our macro expansion.
+        _IGNORE_HAS_INCLUDE = '#define __has_include(inc) __has_include(inc)\n'  # pylint: disable=invalid-name
+
+        # A pseudo file is generated to contain all defines and the macros whose expanded forms are needed
+        macro_dumper = pp_output + _IGNORE_HAS_INCLUDE + \
+            '\n'.join(f'{_MARKER} {name} {_MARKER}' for name in macro_names) + '\n'
+        macro_definitions = self.preprocess(Clang.STDIN_FILENAME, ['-Wno-macro-redefined', '-Wno-builtin-macro-redefined'],
+                                            trim=False, input=macro_dumper, ignore_cmds=True, **kwargs)
+
+        return dict(zip(macro_names, re.findall(_DEFINITION_RE, macro_definitions, re.S | re.M)))
 
     def run_plugin(self, plugin_lib: AnyStr, plugin_name: AnyStr, filename: AnyStr, extra_args: Iterable[Text] = None, *,
                    get_stdout: bool = True, check: bool = False, **kwargs) -> subprocess.CompletedProcess:
