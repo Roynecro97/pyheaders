@@ -208,17 +208,7 @@ ostream &operator<<(ostream &os, const ValueInfo &value_info)
         {
             const auto element_type = type->getAsArrayTypeUnsafe()->getElementType();
 
-            const auto array_size = [&element_type](const APValue &value) {
-                const auto real_size = value.getArraySize();
-                if (element_type->isAnyCharacterType() &&
-                    (!element_type->isCharType() || element_type.getCanonicalType().getAsString() == element_type.getAsString()) &&
-                    value.getArrayInitializedElts() > 0 &&
-                    value.getArrayInitializedElt(real_size - 1).getInt() == 0)
-                {
-                    return real_size - 1;
-                }
-                return real_size;
-            }(value); // structured binding cannot be captured
+            const auto array_size = value.getArrayInitializedElts();
 
             // Handle char, signed char, unsigned char (regular strings)
             if (element_type->isCharType())
