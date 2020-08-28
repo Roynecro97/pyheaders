@@ -154,7 +154,7 @@ def _char_type(name: Text, encoding: Text = 'utf-8'):
 
 
 def _str_type(name: Text, encoding: Text = 'utf-8'):
-    def _mass_decoder(*values: AnyStr) -> Text:
+    def _decoder(*values: AnyStr) -> Text:
         if all(isinstance(value, str) for value in values):
             return ''.join(values)
 
@@ -168,8 +168,23 @@ def _str_type(name: Text, encoding: Text = 'utf-8'):
                 temp += value
         return result + temp.decode(encoding)
 
-    _mass_decoder.__name__ = _mass_decoder.__qualname__ = f'{name}[]'
-    return _mass_decoder
+    _decoder.__name__ = _decoder.__qualname__ = f'{name}[]'
+    return _decoder
+
+
+def _fix_encoding(text: Text) -> Text:
+    '''
+    Attempt to fix utf-8 strings.
+
+    clang gives a bad utf-8 encoded strings sometimes, attempt to fix them by decoding
+    the string manually.
+    '''
+    if all(ord(c) <= 0xff for c in text):
+        try:
+            return b''.join(ord(c).to_bytes(1, sys.byteorder) for c in text).decode('utf-8')
+        except ValueError:
+            pass
+    return text
 
 
 def unknown_type(*fields):
@@ -226,7 +241,7 @@ def parse_value(raw_value: Text, /, scope: Optional[AnyScope] = None) -> Any:  #
     # char or string
     if match(r'''^(?P<quote>'|").*(?P=quote)$'''):
         # Reevaluate escaped characters
-        return eval(last_match.group())  # pylint: disable=eval-used
+        return _fix_encoding(eval(last_match.group()))  # pylint: disable=eval-used
 
     # bool
     if match(r'^(true|false)$', flags=re.I):
@@ -240,7 +255,7 @@ def parse_value(raw_value: Text, /, scope: Optional[AnyScope] = None) -> Any:  #
     # Named types
     if match(r'^(?P<type>.+?)\((?P<params>.*)\)$'):
         typename, params = _func_split(last_match.group())
-        params = (parse_value(param, scope) for param in contextual_split(params))
+        params = [parse_value(param, scope) for param in contextual_split(params)]
 
         def get_type(typename: Text, /, default=None):
             return scope.get(typename, DEFAULT_TYPES.get(typename, default))
@@ -254,7 +269,7 @@ def parse_value(raw_value: Text, /, scope: Optional[AnyScope] = None) -> Any:  #
         try:
             return type_func(*params)
         except ValueError:
-            return unknown_type(params)
+            return unknown_type(*params)
 
     # Give up and use the raw value
     return raw_value
