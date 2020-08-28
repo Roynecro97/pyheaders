@@ -18,10 +18,6 @@
 using namespace std;
 using namespace clang;
 
-#if __cplusplus < 201402L
-using llvm::make_unique;
-#endif
-
 // #define DEBUG_PLUGIN
 #ifndef DEBUG_PLUGIN
 #define DBG(...)
@@ -80,6 +76,21 @@ static inline bool HasAnyFields(const CXXRecordDecl *decl)
     }
     return any_of(decl->bases_begin(), decl->bases_end(), BaseHasAnyFields);
 }
+
+struct ASTDeallocator
+{
+    ASTContext &context;
+
+    ASTDeallocator(ASTContext &ctx) : context{ctx} {}
+
+    void operator()(void *p)
+    {
+        context.Deallocate(p);
+    }
+};
+
+template <typename T>
+using unique_ast_ptr = unique_ptr<T, ASTDeallocator>;
 
 ostream &operator<<(ostream &os, const ValueInfo &value_info);
 
@@ -785,11 +796,7 @@ public:
         }
 
         // Create a CallExpr for a call to the current function
-        auto ast_dealloc = [&](void *p) {
-            DBG(p);
-            context->Deallocate(p);
-        };
-        unique_ptr<DeclRefExpr, decltype(ast_dealloc)> decl_ref(
+        unique_ast_ptr<DeclRefExpr> decl_ref{
             DeclRefExpr::Create(
                 *context,
                 decl->getQualifierLoc(),
@@ -800,9 +807,9 @@ public:
                 decl->getType(),
                 ExprValueKind::VK_LValue,
                 decl),
-            ast_dealloc);
+            *context};
 
-        unique_ptr<ImplicitCastExpr, decltype(ast_dealloc)> cast_expr(
+        unique_ast_ptr<ImplicitCastExpr> cast_expr{
             ImplicitCastExpr::Create(
                 *context,
                 context->getPointerType(decl->getType()),
@@ -810,9 +817,9 @@ public:
                 decl_ref.get(),
                 nullptr, // const CXXCastPath * BasePath
                 ExprValueKind::VK_RValue),
-            ast_dealloc);
+            *context};
 
-        unique_ptr<CallExpr, decltype(ast_dealloc)> func_call(
+        unique_ast_ptr<CallExpr> func_call{
             CallExpr::Create(
                 *context,
                 cast_expr.get(),
@@ -820,7 +827,7 @@ public:
                 result_type,
                 ExprValueKind::VK_RValue,
                 decl->getLocation()),
-            ast_dealloc);
+            *context};
 
         Expr::EvalResult result;
         if (!func_call->EvaluateAsConstantExpr(result, Expr::ConstExprUsage::EvaluateForCodeGen, *context))
