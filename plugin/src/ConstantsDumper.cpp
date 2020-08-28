@@ -174,6 +174,12 @@ ostream &operator<<(ostream &os, const ValueInfo &value_info)
         return os << "<non-literal>";
     }
 
+    // Peel references
+    if (type->isReferenceType())
+    {
+        return os << ValueInfo(value, type->getPointeeType(), ast_context);
+    }
+
     if (type->isFundamentalType())
     {
         if (type->isAnyCharacterType())
