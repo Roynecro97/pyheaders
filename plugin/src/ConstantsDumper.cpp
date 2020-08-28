@@ -244,9 +244,37 @@ ostream &operator<<(ostream &os, const StructInfo &struct_info)
     auto &&[value, type, ast_context, last] = struct_info;
     auto *record_decl = type->getAsCXXRecordDecl();
 
-    const auto base_count = value.getStructNumBases();
     const auto field_count = value.getStructNumFields();
 
+    // Turn the initializer_list into an array
+    if (record_decl->getName() == "initializer_list" && record_decl->getQualifiedNameAsString().find("std::") == 0)
+    {
+        auto field_iter = record_decl->field_begin();
+        auto field_end = record_decl->field_end();
+        for (unsigned i = 0; i < field_count; ++i)
+        {
+            const auto &field = value.getStructField(i);
+
+            // The amount of fields in the type should be the same as the one in the value
+            // so we shouldn't get into trouble here...
+            if (field_iter != field_end)
+            {
+                const auto &field_type = field_iter->getType();
+                if (field_type->isPointerType() || field_type->isArrayType())
+                {
+                    return os << ValueInfo(field, field_type, ast_context);
+                }
+                ++field_iter;
+            }
+            else
+            {
+                // No point to continue atm.
+                break;
+            }
+        }
+    }
+
+    const auto base_count = value.getStructNumBases();
     auto base_iter = record_decl->bases_begin();
     auto base_end = record_decl->bases_end();
     for (unsigned i = 0; i < base_count; ++i)
@@ -344,6 +372,24 @@ ostream &operator<<(ostream &os, const ValueInfo &value_info)
             const auto content_begin = str.find(string_delim);
             const auto content_end = str.rfind(string_delim) + 1;
             return os << str.substr(content_begin, content_end - content_begin);
+        }
+        if (type->isPointerType() || (type->isArrayType() && !value.isArray()))
+        {
+            if (value.isLValue())
+            {
+                const auto *expr = value.getLValueBase().dyn_cast<const Expr *>();
+                if (expr && expr->getType()->isArrayType())
+                {
+                    if (const auto *init_list = GetChild<InitListExpr>(*expr))
+                    {
+                        Expr::EvalResult result;
+                        if (init_list->EvaluateAsConstantExpr(result, Expr::ConstExprUsage::EvaluateForCodeGen, ast_context))
+                        {
+                            return os << ValueInfo(result.Val, init_list->getType(), ast_context);
+                        }
+                    }
+                }
+            }
         }
         if (type->isArrayType())
         {
