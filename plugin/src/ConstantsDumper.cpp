@@ -77,6 +77,130 @@ static inline bool HasAnyFields(const CXXRecordDecl *decl)
     return any_of(decl->bases_begin(), decl->bases_end(), BaseHasAnyFields);
 }
 
+/**
+ * @brief Get the first parent node of type `Parent` for `node` in the AST that matches
+ *        the given predicate.
+ *
+ * @tparam Parent   The type of the parent node.
+ * @param context   The AST context.
+ * @param node      The starting node.
+ * @param pred      A boolean predicate than accepts a `const Parent&`.
+ *
+ * @return const Parent*    Returns the first matching parent or `nullptr` if no such parent exists.
+ */
+template <typename Parent, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
+const Parent *GetParent(ASTContext &context, const ast_type_traits::DynTypedNode &node, const Predicate &pred)
+{
+    auto &&parents = context.getParents(node);
+    for (auto &&dynamic_parent : parents)
+    {
+        if (const Parent *parent = dynamic_parent.get<Parent>();
+            parent != nullptr && pred(*parent))
+        {
+            return parent;
+        }
+        if (const Parent *matching_ancestor = GetParent<Parent>(context, dynamic_parent, pred);
+            matching_ancestor != nullptr)
+        {
+            return matching_ancestor;
+        }
+    }
+    return nullptr;
+}
+
+template <typename Parent>
+const Parent *GetParent(ASTContext &context, const ast_type_traits::DynTypedNode &node)
+{
+    return GetParent<Parent>(context, node, [](const Parent &) { return true; });
+}
+
+template <typename Parent, typename Node, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
+const Parent *GetParent(ASTContext &context, const Node &node, const Predicate &pred)
+{
+    return GetParent<Parent>(context, ast_type_traits::DynTypedNode::create(node), pred);
+}
+
+template <typename Parent, typename Node>
+const Parent *GetParent(ASTContext &context, const Node &node)
+{
+    return GetParent<Parent>(context, ast_type_traits::DynTypedNode::create(node));
+}
+
+template <typename Parent, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
+bool HasParent(ASTContext &context, const ast_type_traits::DynTypedNode &node, const Predicate &pred)
+{
+    return GetParent<Parent>(context, node, pred) != nullptr;
+}
+
+template <typename Parent>
+bool HasParent(ASTContext &context, const ast_type_traits::DynTypedNode &node)
+{
+    return GetParent<Parent>(context, node) != nullptr;
+}
+
+template <typename Parent, typename Node, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
+bool HasParent(ASTContext &context, const Node &node, const Predicate &pred)
+{
+    return GetParent<Parent>(context, node, pred) != nullptr;
+}
+
+template <typename Parent, typename Node>
+bool HasParent(ASTContext &context, const Node &node)
+{
+    return GetParent<Parent>(context, node) != nullptr;
+}
+
+/**
+ * @brief Get the first child node of type `Child` for `node` in the AST that matches
+ *        the given predicate.
+ *
+ * @tparam Child    The type of the child node.
+ * @param node      The starting node.
+ * @param pred      A boolean predicate than accepts a `const Child&`.
+ *
+ * @return const Child* Returns the first matching child or `nullptr` if no such child exists.
+ */
+template <typename Child, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Child &>>>
+const Child *GetChild(const Stmt &stmt, const Predicate &pred)
+{
+    for (auto &&child_stmt : stmt.children())
+    {
+        if (!child_stmt)
+        {
+            continue;
+        }
+        if (const auto *child = dyn_cast<Child>(child_stmt);
+            child != nullptr && pred(*child))
+        {
+            return child;
+        }
+        if (const Child *matching_descendant = GetChild<Child>(*child_stmt, pred);
+            matching_descendant != nullptr)
+        {
+            return matching_descendant;
+        }
+    }
+    return nullptr;
+}
+
+template <typename Child>
+const Child *GetChild(const Stmt &stmt)
+{
+    return GetChild<Child>(stmt, [](const Child &) { return true; });
+}
+
+template <typename Child, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Child &>>>
+bool HasChild(const Stmt &stmt, const Predicate &pred)
+{
+    return GetChild<Child>(stmt, pred) != nullptr;
+}
+
+template <typename Child>
+bool HasChild(const Stmt &stmt)
+{
+    return GetChild<Child>(stmt) != nullptr;
+}
+
 struct ASTDeallocator
 {
     ASTContext &context;
@@ -301,79 +425,6 @@ ostream &operator<<(ostream &os, const RecordInfo &record_info)
         }
     }
     return os;
-}
-
-/**
- * @brief Get the first parent node of type `Parent` for `node` in the AST that matches
- *        the given predicate.
- *
- * @tparam Parent   The type of the parent node.
- * @param context   The AST context.
- * @param node      The starting node.
- * @param pred      A boolean predicate than accepts a `const Parent&`.
- *
- * @return const Parent*    Returns the first matching parent or `nullptr` if no such parent exists.
- */
-template <typename Parent, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
-const Parent *GetParent(ASTContext &context, const ast_type_traits::DynTypedNode &node, const Predicate &pred)
-{
-    auto &&parents = context.getParents(node);
-    for (auto &&dynamic_parent : parents)
-    {
-        if (const Parent *parent = dynamic_parent.get<Parent>();
-            parent != nullptr && pred(*parent))
-        {
-            return parent;
-        }
-        if (const Parent *matching_ancestor = GetParent<Parent>(context, dynamic_parent, pred);
-            matching_ancestor != nullptr)
-        {
-            return matching_ancestor;
-        }
-    }
-    return nullptr;
-}
-
-template <typename Parent>
-const Parent *GetParent(ASTContext &context, const ast_type_traits::DynTypedNode &node)
-{
-    return GetParent<Parent>(context, node, [](const Parent &) { return true; });
-}
-
-template <typename Parent, typename Node, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
-const Parent *GetParent(ASTContext &context, const Node &node, const Predicate &pred)
-{
-    return GetParent<Parent>(context, ast_type_traits::DynTypedNode::create(node), pred);
-}
-
-template <typename Parent, typename Node>
-const Parent *GetParent(ASTContext &context, const Node &node)
-{
-    return GetParent<Parent>(context, ast_type_traits::DynTypedNode::create(node));
-}
-
-template <typename Parent, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
-bool HasParent(ASTContext &context, const ast_type_traits::DynTypedNode &node, const Predicate &pred)
-{
-    return GetParent<Parent>(context, node, pred) != nullptr;
-}
-
-template <typename Parent>
-bool HasParent(ASTContext &context, const ast_type_traits::DynTypedNode &node)
-{
-    return GetParent<Parent>(context, node) != nullptr;
-}
-
-template <typename Parent, typename Node, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
-bool HasParent(ASTContext &context, const Node &node, const Predicate &pred)
-{
-    return GetParent<Parent>(context, node, pred) != nullptr;
-}
-
-template <typename Parent, typename Node>
-bool HasParent(ASTContext &context, const Node &node)
-{
-    return GetParent<Parent>(context, node) != nullptr;
 }
 
 class ConstantsDumperVisitor : public RecursiveASTVisitor<ConstantsDumperVisitor>
