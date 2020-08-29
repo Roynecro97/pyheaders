@@ -16,7 +16,7 @@ if os.path.exists(README_PATH):
 
 setuptools.setup(
     name='pyheaders',
-    version='0.0.6',
+    version='0.0.7',
     url='https://github.com/Roynecro97/pyheaders',
     project_urls={
         "Source Code": 'https://github.com/Roynecro97/pyheaders'

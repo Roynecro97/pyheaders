@@ -18,10 +18,6 @@
 using namespace std;
 using namespace clang;
 
-#if __cplusplus < 201402L
-using llvm::make_unique;
-#endif
-
 // #define DEBUG_PLUGIN
 #ifndef DEBUG_PLUGIN
 #define DBG(...)
@@ -81,6 +77,145 @@ static inline bool HasAnyFields(const CXXRecordDecl *decl)
     return any_of(decl->bases_begin(), decl->bases_end(), BaseHasAnyFields);
 }
 
+/**
+ * @brief Get the first parent node of type `Parent` for `node` in the AST that matches
+ *        the given predicate.
+ *
+ * @tparam Parent   The type of the parent node.
+ * @param context   The AST context.
+ * @param node      The starting node.
+ * @param pred      A boolean predicate than accepts a `const Parent&`.
+ *
+ * @return const Parent*    Returns the first matching parent or `nullptr` if no such parent exists.
+ */
+template <typename Parent, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
+const Parent *GetParent(ASTContext &context, const ast_type_traits::DynTypedNode &node, const Predicate &pred)
+{
+    auto &&parents = context.getParents(node);
+    for (auto &&dynamic_parent : parents)
+    {
+        if (const Parent *parent = dynamic_parent.get<Parent>();
+            parent != nullptr && pred(*parent))
+        {
+            return parent;
+        }
+        if (const Parent *matching_ancestor = GetParent<Parent>(context, dynamic_parent, pred);
+            matching_ancestor != nullptr)
+        {
+            return matching_ancestor;
+        }
+    }
+    return nullptr;
+}
+
+template <typename Parent>
+const Parent *GetParent(ASTContext &context, const ast_type_traits::DynTypedNode &node)
+{
+    return GetParent<Parent>(context, node, [](const Parent &) { return true; });
+}
+
+template <typename Parent, typename Node, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
+const Parent *GetParent(ASTContext &context, const Node &node, const Predicate &pred)
+{
+    return GetParent<Parent>(context, ast_type_traits::DynTypedNode::create(node), pred);
+}
+
+template <typename Parent, typename Node>
+const Parent *GetParent(ASTContext &context, const Node &node)
+{
+    return GetParent<Parent>(context, ast_type_traits::DynTypedNode::create(node));
+}
+
+template <typename Parent, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
+bool HasParent(ASTContext &context, const ast_type_traits::DynTypedNode &node, const Predicate &pred)
+{
+    return GetParent<Parent>(context, node, pred) != nullptr;
+}
+
+template <typename Parent>
+bool HasParent(ASTContext &context, const ast_type_traits::DynTypedNode &node)
+{
+    return GetParent<Parent>(context, node) != nullptr;
+}
+
+template <typename Parent, typename Node, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
+bool HasParent(ASTContext &context, const Node &node, const Predicate &pred)
+{
+    return GetParent<Parent>(context, node, pred) != nullptr;
+}
+
+template <typename Parent, typename Node>
+bool HasParent(ASTContext &context, const Node &node)
+{
+    return GetParent<Parent>(context, node) != nullptr;
+}
+
+/**
+ * @brief Get the first child node of type `Child` for `node` in the AST that matches
+ *        the given predicate.
+ *
+ * @tparam Child    The type of the child node.
+ * @param node      The starting node.
+ * @param pred      A boolean predicate than accepts a `const Child&`.
+ *
+ * @return const Child* Returns the first matching child or `nullptr` if no such child exists.
+ */
+template <typename Child, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Child &>>>
+const Child *GetChild(const Stmt &stmt, const Predicate &pred)
+{
+    for (auto &&child_stmt : stmt.children())
+    {
+        if (!child_stmt)
+        {
+            continue;
+        }
+        if (const auto *child = dyn_cast<Child>(child_stmt);
+            child != nullptr && pred(*child))
+        {
+            return child;
+        }
+        if (const Child *matching_descendant = GetChild<Child>(*child_stmt, pred);
+            matching_descendant != nullptr)
+        {
+            return matching_descendant;
+        }
+    }
+    return nullptr;
+}
+
+template <typename Child>
+const Child *GetChild(const Stmt &stmt)
+{
+    return GetChild<Child>(stmt, [](const Child &) { return true; });
+}
+
+template <typename Child, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Child &>>>
+bool HasChild(const Stmt &stmt, const Predicate &pred)
+{
+    return GetChild<Child>(stmt, pred) != nullptr;
+}
+
+template <typename Child>
+bool HasChild(const Stmt &stmt)
+{
+    return GetChild<Child>(stmt) != nullptr;
+}
+
+struct ASTDeallocator
+{
+    ASTContext &context;
+
+    ASTDeallocator(ASTContext &ctx) : context{ctx} {}
+
+    void operator()(void *p)
+    {
+        context.Deallocate(p);
+    }
+};
+
+template <typename T>
+using unique_ast_ptr = unique_ptr<T, ASTDeallocator>;
+
 ostream &operator<<(ostream &os, const ValueInfo &value_info);
 
 ostream &operator<<(ostream &os, const CharInfo &char_info)
@@ -109,9 +244,37 @@ ostream &operator<<(ostream &os, const StructInfo &struct_info)
     auto &&[value, type, ast_context, last] = struct_info;
     auto *record_decl = type->getAsCXXRecordDecl();
 
-    const auto base_count = value.getStructNumBases();
     const auto field_count = value.getStructNumFields();
 
+    // Turn the initializer_list into an array
+    if (record_decl->getName() == "initializer_list" && record_decl->getQualifiedNameAsString().find("std::") == 0)
+    {
+        auto field_iter = record_decl->field_begin();
+        auto field_end = record_decl->field_end();
+        for (unsigned i = 0; i < field_count; ++i)
+        {
+            const auto &field = value.getStructField(i);
+
+            // The amount of fields in the type should be the same as the one in the value
+            // so we shouldn't get into trouble here...
+            if (field_iter != field_end)
+            {
+                const auto &field_type = field_iter->getType();
+                if (field_type->isPointerType() || field_type->isArrayType())
+                {
+                    return os << ValueInfo(field, field_type, ast_context);
+                }
+                ++field_iter;
+            }
+            else
+            {
+                // No point to continue atm.
+                break;
+            }
+        }
+    }
+
+    const auto base_count = value.getStructNumBases();
     auto base_iter = record_decl->bases_begin();
     auto base_end = record_decl->bases_end();
     for (unsigned i = 0; i < base_count; ++i)
@@ -174,6 +337,12 @@ ostream &operator<<(ostream &os, const ValueInfo &value_info)
         return os << "<non-literal>";
     }
 
+    // Peel references
+    if (type->isReferenceType())
+    {
+        return os << ValueInfo(value, type->getPointeeType(), ast_context);
+    }
+
     if (type->isFundamentalType())
     {
         if (type->isAnyCharacterType())
@@ -203,6 +372,24 @@ ostream &operator<<(ostream &os, const ValueInfo &value_info)
             const auto content_begin = str.find(string_delim);
             const auto content_end = str.rfind(string_delim) + 1;
             return os << str.substr(content_begin, content_end - content_begin);
+        }
+        if (type->isPointerType() || (type->isArrayType() && !value.isArray()))
+        {
+            if (value.isLValue())
+            {
+                const auto *expr = value.getLValueBase().dyn_cast<const Expr *>();
+                if (expr && expr->getType()->isArrayType())
+                {
+                    if (const auto *init_list = GetChild<InitListExpr>(*expr))
+                    {
+                        Expr::EvalResult result;
+                        if (init_list->EvaluateAsConstantExpr(result, Expr::ConstExprUsage::EvaluateForCodeGen, ast_context))
+                        {
+                            return os << ValueInfo(result.Val, init_list->getType(), ast_context);
+                        }
+                    }
+                }
+            }
         }
         if (type->isArrayType())
         {
@@ -284,79 +471,6 @@ ostream &operator<<(ostream &os, const RecordInfo &record_info)
         }
     }
     return os;
-}
-
-/**
- * @brief Get the first parent node of type `Parent` for `node` in the AST that matches
- *        the given predicate.
- *
- * @tparam Parent   The type of the parent node.
- * @param context   The AST context.
- * @param node      The starting node.
- * @param pred      A boolean predicate than accepts a `const Parent&`.
- *
- * @return const Parent*    Returns the first matching parent or `nullptr` if no such parent exists.
- */
-template <typename Parent, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
-const Parent *GetParent(ASTContext &context, const ast_type_traits::DynTypedNode &node, const Predicate &pred)
-{
-    auto &&parents = context.getParents(node);
-    for (auto &&dynamic_parent : parents)
-    {
-        if (const Parent *parent = dynamic_parent.get<Parent>();
-            parent != nullptr && pred(*parent))
-        {
-            return parent;
-        }
-        if (const Parent *matching_ancestor = GetParent<Parent>(context, dynamic_parent, pred);
-            matching_ancestor != nullptr)
-        {
-            return matching_ancestor;
-        }
-    }
-    return nullptr;
-}
-
-template <typename Parent>
-const Parent *GetParent(ASTContext &context, const ast_type_traits::DynTypedNode &node)
-{
-    return GetParent<Parent>(context, node, [](const Parent &) { return true; });
-}
-
-template <typename Parent, typename Node, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
-const Parent *GetParent(ASTContext &context, const Node &node, const Predicate &pred)
-{
-    return GetParent<Parent>(context, ast_type_traits::DynTypedNode::create(node), pred);
-}
-
-template <typename Parent, typename Node>
-const Parent *GetParent(ASTContext &context, const Node &node)
-{
-    return GetParent<Parent>(context, ast_type_traits::DynTypedNode::create(node));
-}
-
-template <typename Parent, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
-bool HasParent(ASTContext &context, const ast_type_traits::DynTypedNode &node, const Predicate &pred)
-{
-    return GetParent<Parent>(context, node, pred) != nullptr;
-}
-
-template <typename Parent>
-bool HasParent(ASTContext &context, const ast_type_traits::DynTypedNode &node)
-{
-    return GetParent<Parent>(context, node) != nullptr;
-}
-
-template <typename Parent, typename Node, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
-bool HasParent(ASTContext &context, const Node &node, const Predicate &pred)
-{
-    return GetParent<Parent>(context, node, pred) != nullptr;
-}
-
-template <typename Parent, typename Node>
-bool HasParent(ASTContext &context, const Node &node)
-{
-    return GetParent<Parent>(context, node) != nullptr;
 }
 
 class ConstantsDumperVisitor : public RecursiveASTVisitor<ConstantsDumperVisitor>
@@ -779,11 +893,7 @@ public:
         }
 
         // Create a CallExpr for a call to the current function
-        auto ast_dealloc = [&](void *p) {
-            DBG(p);
-            context->Deallocate(p);
-        };
-        unique_ptr<DeclRefExpr, decltype(ast_dealloc)> decl_ref(
+        unique_ast_ptr<DeclRefExpr> decl_ref{
             DeclRefExpr::Create(
                 *context,
                 decl->getQualifierLoc(),
@@ -794,9 +904,9 @@ public:
                 decl->getType(),
                 ExprValueKind::VK_LValue,
                 decl),
-            ast_dealloc);
+            *context};
 
-        unique_ptr<ImplicitCastExpr, decltype(ast_dealloc)> cast_expr(
+        unique_ast_ptr<ImplicitCastExpr> cast_expr{
             ImplicitCastExpr::Create(
                 *context,
                 context->getPointerType(decl->getType()),
@@ -804,9 +914,9 @@ public:
                 decl_ref.get(),
                 nullptr, // const CXXCastPath * BasePath
                 ExprValueKind::VK_RValue),
-            ast_dealloc);
+            *context};
 
-        unique_ptr<CallExpr, decltype(ast_dealloc)> func_call(
+        unique_ast_ptr<CallExpr> func_call{
             CallExpr::Create(
                 *context,
                 cast_expr.get(),
@@ -814,7 +924,7 @@ public:
                 result_type,
                 ExprValueKind::VK_RValue,
                 decl->getLocation()),
-            ast_dealloc);
+            *context};
 
         Expr::EvalResult result;
         if (!func_call->EvaluateAsConstantExpr(result, Expr::ConstExprUsage::EvaluateForCodeGen, *context))
