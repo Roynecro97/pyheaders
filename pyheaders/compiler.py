@@ -354,7 +354,7 @@ class Clang:
     __ADD_PLUGIN_FLAG = '-add-plugin'  # Run after main command
     __SYNTAX_ONLY_FLAG = '-fsyntax-only'
 
-    def __init__(self, exec_path: AnyStr = 'clang++-10', *,
+    def __init__(self, exec_path: AnyStr = 'clang++-11', *,
                  commands_parser: CommandsParser = None,
                  verbose: bool = False):
         self.verbose = verbose

@@ -6,7 +6,7 @@ C++ header (and source) parser for Python using Clang plugins.
 
 1. Get the required tools:
 
-   - You'll need to have clang-10 and the required dev tools installed.
+   - You'll need to have clang-11 and the required dev tools installed.
 
      To install using `apt` on Debian / Ubuntu see [LLVM Debian/Ubuntu nightly packages](https://apt.llvm.org) page.
 
