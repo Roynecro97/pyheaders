@@ -16,7 +16,7 @@ if os.path.exists(README_PATH):
 
 setuptools.setup(
     name='pyheaders',
-    version='0.0.7',
+    version='0.1.0',
     url='https://github.com/Roynecro97/pyheaders',
     project_urls={
         "Source Code": 'https://github.com/Roynecro97/pyheaders'
@@ -45,8 +45,9 @@ setuptools.setup(
         'Programming Language :: Python',
         'Programming Language :: Python :: 3',
         'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: Implementation :: CPython',
-        'Development Status :: 3 - Alpha',
+        'Development Status :: 4 - Beta',
         'Topic :: Software Development',
         'Topic :: Software Development :: Libraries',
         'Topic :: Software Development :: Libraries :: Python Modules',

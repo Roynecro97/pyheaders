@@ -1,5 +1,7 @@
 #include "clang/AST/AST.h"
 #include "clang/AST/ASTConsumer.h"
+#include "clang/AST/ASTTypeTraits.h"
+#include "clang/AST/ParentMapContext.h"
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendPluginRegistry.h"
@@ -89,9 +91,9 @@ static inline bool HasAnyFields(const CXXRecordDecl *decl)
  * @return const Parent*    Returns the first matching parent or `nullptr` if no such parent exists.
  */
 template <typename Parent, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
-const Parent *GetParent(ASTContext &context, const ast_type_traits::DynTypedNode &node, const Predicate &pred)
+const Parent *GetParent(ASTContext &context, const DynTypedNode &node, const Predicate &pred)
 {
-    auto &&parents = context.getParents(node);
+    auto &&parents = context.getParentMapContext().getParents(node);
     for (auto &&dynamic_parent : parents)
     {
         if (const Parent *parent = dynamic_parent.get<Parent>();
@@ -109,7 +111,7 @@ const Parent *GetParent(ASTContext &context, const ast_type_traits::DynTypedNode
 }
 
 template <typename Parent>
-const Parent *GetParent(ASTContext &context, const ast_type_traits::DynTypedNode &node)
+const Parent *GetParent(ASTContext &context, const DynTypedNode &node)
 {
     return GetParent<Parent>(context, node, [](const Parent &) { return true; });
 }
@@ -117,23 +119,23 @@ const Parent *GetParent(ASTContext &context, const ast_type_traits::DynTypedNode
 template <typename Parent, typename Node, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
 const Parent *GetParent(ASTContext &context, const Node &node, const Predicate &pred)
 {
-    return GetParent<Parent>(context, ast_type_traits::DynTypedNode::create(node), pred);
+    return GetParent<Parent>(context, DynTypedNode::create(node), pred);
 }
 
 template <typename Parent, typename Node>
 const Parent *GetParent(ASTContext &context, const Node &node)
 {
-    return GetParent<Parent>(context, ast_type_traits::DynTypedNode::create(node));
+    return GetParent<Parent>(context, DynTypedNode::create(node));
 }
 
 template <typename Parent, typename Predicate, typename = enable_if_t<is_invocable_r_v<bool, Predicate, const Parent &>>>
-bool HasParent(ASTContext &context, const ast_type_traits::DynTypedNode &node, const Predicate &pred)
+bool HasParent(ASTContext &context, const DynTypedNode &node, const Predicate &pred)
 {
     return GetParent<Parent>(context, node, pred) != nullptr;
 }
 
 template <typename Parent>
-bool HasParent(ASTContext &context, const ast_type_traits::DynTypedNode &node)
+bool HasParent(ASTContext &context, const DynTypedNode &node)
 {
     return GetParent<Parent>(context, node) != nullptr;
 }
@@ -635,7 +637,7 @@ public:
     }
 
 #ifdef DEBUG_PLUGIN
-    void all_parents(const ast_type_traits::DynTypedNode &node, std::string depth = ""s)
+    void all_parents(const DynTypedNode &node, std::string depth = ""s)
     {
         DBG(depth);
         auto &&parents = context->getParents(node);
@@ -656,7 +658,7 @@ public:
     {
         DBG_NOTE(~~~~~~~~~~~~~~~~~~~~~~);
         DBG_NOTE(Traversing all parents);
-        all_parents(ast_type_traits::DynTypedNode::create(node));
+        all_parents(DynTypedNode::create(node));
         DBG_NOTE(~~~~~~~~~~~~~~~~~~~~~~);
     }
 #endif // DEBUG_PLUGIN
